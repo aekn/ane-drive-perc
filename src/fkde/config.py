@@ -57,6 +57,7 @@ class TrainCfg:
     score_threshold: float = 0.05
     nms_iou: float = 0.6
     amp: bool = False
+    val_amp: bool = False
 
 
 @dataclass

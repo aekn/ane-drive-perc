@@ -134,6 +134,7 @@ def train_cell(cfg: Config) -> None:
         collate_fn=detection_collate,
         pin_memory=device.type == "cuda",
         drop_last=True,
+        persistent_workers=cfg.train.num_workers > 0,
     )
     print(f"[data] train images: {len(train_ds)}  steps/epoch: {len(train_loader)}")
 
@@ -159,6 +160,7 @@ def train_cell(cfg: Config) -> None:
             collate_fn=detection_collate,
             pin_memory=device.type == "cuda",
             drop_last=False,
+            persistent_workers=cfg.train.num_workers > 0,
         )
         print(f"[data] val images: {len(val_ds)}")
     else:
@@ -305,6 +307,7 @@ def train_cell(cfg: Config) -> None:
                 image_size=cfg.data.image_size,
                 score_threshold=cfg.train.score_threshold,
                 nms_iou=cfg.train.nms_iou,
+                amp=cfg.train.val_amp,
             )
             v_dt = time.time() - v_t0
             print(

@@ -26,7 +26,7 @@ optim:
 train:
   epochs: 50
   batch_size: 32
-  num_workers: 4
+  num_workers: 8
   device: auto
   seed: 0
   log_interval: 50
@@ -38,6 +38,7 @@ train:
   score_threshold: 0.05
   nms_iou: 0.6
   amp: true
+  val_amp: false
 
 loss:
   center_sampling_radius: 1.5
