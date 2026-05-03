@@ -1,0 +1,50 @@
+name: cell_a
+
+data:
+  manifest_path: data/manifests/bdd_edge_10k_v1.json
+  images_dir: data/raw/bdd100k/images/train
+  label_json: data/raw/bdd100k/labels/bdd100k_labels_images_train.json
+  val_manifest_path: data/manifests/bdd_val_full.json
+  val_images_dir: data/raw/bdd100k/images/val
+  val_label_json: data/raw/bdd100k/labels/bdd100k_labels_images_val.json
+  image_size: 384
+
+model:
+  num_classes: 10
+  fpn_channels: 256
+  backbone_channels: [48, 96, 192, 384]
+  backbone_depths: [2, 2, 14, 2]
+
+optim:
+  optimizer: adamw
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  momentum: 0.9
+  warmup_epochs: 2
+  grad_clip: 10.0
+
+train:
+  epochs: 50
+  batch_size: 32
+  num_workers: 4
+  device: auto
+  seed: 0
+  log_interval: 50
+  out_dir: runs/cell_a
+  eval_interval: 1
+  val_batch_size: 16
+  save_best: true
+  resume: true
+  score_threshold: 0.05
+  nms_iou: 0.6
+  amp: true
+
+loss:
+  center_sampling_radius: 1.5
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+  area_a_ref: 1024.0
+  area_beta: 0.5
+  area_w_max: 4.0
+  lambda_cls_match: 1.0
+  lambda_box_match: 2.5
