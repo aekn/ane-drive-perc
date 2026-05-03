@@ -2,14 +2,14 @@
 
 A single shared head produces three predictions per pixel per FPN level:
 cls_logits, reg, ctr.
-Predictions are scored against two assignment rules at training: one-to-many 
+Predictions are scored against two assignment rules at training: one-to-many
 and one-to-one, weighted by ProgLoss. At deploy, only one-to-one branch is read.
 """
 
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
 import torch.nn as nn

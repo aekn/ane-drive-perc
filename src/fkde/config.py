@@ -37,7 +37,7 @@ class OptimCfg:
     weight_decay: float = 1e-4
     momentum: float = 0.9
     warmup_epochs: int = 1
-    optimizer: str = "adamw"     # "adamw" | "sgd"
+    optimizer: str = "adamw"  # "adamw" | "sgd"
     grad_clip: float = 10.0
 
 
@@ -46,14 +46,14 @@ class TrainCfg:
     epochs: int = 50
     batch_size: int = 8
     num_workers: int = 4
-    device: str = "auto"          # "auto" | "cpu" | "mps" | "cuda"
+    device: str = "auto"  # "auto" | "cpu" | "mps" | "cuda"
     seed: int = 0
     log_interval: int = 50
     out_dir: str = "runs/cell_a"
-    eval_interval: int = 1        # epochs; 0 disables validation
+    eval_interval: int = 1  # epochs; 0 disables validation
     val_batch_size: int = 16
     save_best: bool = True
-    resume: bool = True           # auto-resume from `last.pt` if present
+    resume: bool = True  # auto-resume from `last.pt` if present
     score_threshold: float = 0.05
     nms_iou: float = 0.6
     amp: bool = False

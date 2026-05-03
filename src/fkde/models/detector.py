@@ -28,8 +28,12 @@ class Detector(nn.Module):
     def __init__(self, cfg: DetectorConfig) -> None:
         super().__init__()
         self.cfg = cfg
-        self.backbone = RepViT(channels=cfg.backbone_channels, depths=cfg.backbone_depths)
-        self.fpn = FPN(in_channels=self.backbone.out_channels, out_channels=cfg.fpn_channels)
+        self.backbone = RepViT(
+            channels=cfg.backbone_channels, depths=cfg.backbone_depths
+        )
+        self.fpn = FPN(
+            in_channels=self.backbone.out_channels, out_channels=cfg.fpn_channels
+        )
         self.head = FCOSHead(in_channels=cfg.fpn_channels, num_classes=cfg.num_classes)
 
     def forward(
