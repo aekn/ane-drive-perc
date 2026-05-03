@@ -43,7 +43,7 @@ class OptimCfg:
 
 @dataclass
 class TrainCfg:
-    epochs: int = 50
+    epochs: int = 100
     batch_size: int = 8
     num_workers: int = 4
     device: str = "auto"  # "auto" | "cpu" | "mps" | "cuda"

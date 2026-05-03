@@ -24,7 +24,7 @@ optim:
   grad_clip: 10.0
 
 train:
-  epochs: 50
+  epochs: 100
   batch_size: 32
   num_workers: 8
   device: auto

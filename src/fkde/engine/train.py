@@ -335,6 +335,21 @@ def train_cell(cfg: Config) -> None:
                     best_path, epoch, model, optimizer, scheduler, best_map, cfg.name
                 )
                 print(f"[ep {epoch}] new best mAP={best_map:.4f} -> best.pt")
+            
+            # Top 3 tracking
+            top3_path = out_dir / f"top3_map_{cur_map:.4f}_ep_{epoch+1:03d}.pt"
+            _save_ckpt(top3_path, epoch, model, optimizer, scheduler, best_map, cfg.name)
+            
+            # Prune to keep only top 3
+            existing_top3 = sorted(out_dir.glob("top3_map_*.pt"), key=lambda p: float(p.stem.split("_")[2]), reverse=True)
+            for p in existing_top3[3:]:
+                p.unlink()
+
+        # Milestones
+        if (epoch + 1) in [50, 75, 100]:
+            ms_path = out_dir / f"epoch_{epoch + 1:03d}.pt"
+            _save_ckpt(ms_path, epoch, model, optimizer, scheduler, best_map, cfg.name)
+            print(f"[ep {epoch}] saved milestone -> {ms_path.name}")
 
         print(f"[ep {epoch}] {epoch_dt:.1f}s  ckpt -> last.pt")
 
