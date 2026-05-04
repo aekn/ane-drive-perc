@@ -1,31 +1,11 @@
-__pycache__/
-*.py[cod]
-*.egg-info/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.ipynb_checkpoints/
+data/
+
+runs/
 
 .venv/
+__pycache__/
+*.py[cod]
+
 .env
 
-data/raw/
-data/processed/
-data/visualizations/
-tests/
-runs/
-checkpoints/
-external/
-*.pt
-*.pth
-*.onnx
-*.mlpackage
-*.mlmodel
-
 .DS_Store
-
-docs/
-CLAUDE.md
-notebooks/
-
-.kaggle/

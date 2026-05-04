@@ -27,3 +27,5 @@ uv run python scripts/eval.py configs/cell_a.yaml runs/cell_a/best.pt
 ```bash
 uv run pytest
 ```
+
+claude --resume c57951c5-0184-4c69-afc5-7456e4df28c3
