@@ -1,7 +1,3 @@
-# scripts/data/inspect_coco.py
-
-from __future__ import annotations
-
 import argparse
 import json
 from collections import Counter, defaultdict
@@ -9,9 +5,9 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Inspect a COCO detection annotation file.")
-    parser.add_argument("path", help="Path to COCO annotation JSON.")
-    return parser.parse_args()
+    p = argparse.ArgumentParser()
+    p.add_argument("path")
+    return p.parse_args()
 
 
 def main() -> None:

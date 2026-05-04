@@ -1,20 +1,21 @@
-# scripts/data/export_bdd_coco.py
-
-from __future__ import annotations
-
 import argparse
 import json
 from pathlib import Path
 from typing import Any
 
-from ane_drive_perc.data.bdd import DETECTION_CATEGORIES, IMAGE_HEIGHT, IMAGE_WIDTH, read_bdd_label
+from ane_drive_perc.data.bdd import (
+    DETECTION_CATEGORIES,
+    IMAGE_HEIGHT,
+    IMAGE_WIDTH,
+    read_bdd_label,
+)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Export a materialized BDD detection split to COCO JSON.")
-    parser.add_argument("--split-dir", required=True, help="Split directory with images/ and labels/.")
-    parser.add_argument("--out", required=True, help="Output COCO annotation JSON path.")
-    return parser.parse_args()
+    p = argparse.ArgumentParser()
+    p.add_argument("--split-dir", required=True)
+    p.add_argument("--out", required=True)
+    return p.parse_args()
 
 
 def coco_categories() -> list[dict[str, Any]]:
