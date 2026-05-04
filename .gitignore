@@ -1,4 +1,10 @@
-data/
+data/raw/
+data/bdd/
+data/hf/
+data/materialized/
+data/qa/
+data/coco/
+data/yolo/
 
 runs/
 

@@ -1,0 +1,29 @@
+name: bdd100k_det
+repo_id: aekn/ane-drive-perc-bdd100k
+revision: main
+
+cache_dir: data/cache/bdd100k-det
+
+splits:
+  train_003k: train_003k_seed42
+  train_005k: train_005k_seed42
+  train_010k: train_010k_seed42
+  train_full: train_full
+  val: vall_full
+  test: test_images
+
+image_size:
+  width: 640
+  height: 384
+
+classes:
+  - pedestrian
+  - rider
+  - car
+  - truck
+  - bus
+  - train
+  - motorcycle
+  - bicycle
+  - traffic light
+  - traffic sign
