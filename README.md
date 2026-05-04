@@ -1,4 +1,4 @@
-# ANE Drive Perception
+# ANE Driving Perception
 
 Compact driving perception models for Apple Neural Engine deployment.
 
