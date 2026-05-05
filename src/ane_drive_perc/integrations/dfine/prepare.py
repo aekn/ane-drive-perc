@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +33,9 @@ def prepare_dfine_teacher_run(
     config_path: str | Path,
     run: bool = False,
     install_requirements: bool | None = None,
+    output_dir_override: str | None = None,
+    summary_dir_override: str | None = None,
+    resume_from_override: str | None = None,
 ) -> DfinePreparedRun:
     config = load_yaml(config_path)
 
@@ -48,17 +49,25 @@ def prepare_dfine_teacher_run(
         raise TypeError("Expected 'pretrained' to be a mapping when provided.")
 
     data_config_path = expect_str(data_cfg, "config")
-    coco_dir = Path(expect_str(data_cfg, "coco_dir"))
+    coco_dir = Path(expect_str(data_cfg, "coco_dir")).expanduser()
     train_split = expect_str(data_cfg, "train_split")
     val_split = expect_str(data_cfg, "val_split")
 
     repo_url = expect_str(dfine_cfg, "repo_url")
-    repo_dir = Path(expect_str(dfine_cfg, "repo_dir"))
+    repo_dir = Path(expect_str(dfine_cfg, "repo_dir")).expanduser()
     ref = expect_str(dfine_cfg, "ref")
     base_config = expect_str(dfine_cfg, "base_config")
-    generated_config_dir = Path(expect_str(dfine_cfg, "generated_config_dir"))
+    generated_config_dir = Path(
+        expect_str(dfine_cfg, "generated_config_dir")
+    ).expanduser()
 
-    output_dir = Path(expect_str(train_cfg, "output_dir"))
+    output_dir = Path(
+        output_dir_override or expect_str(train_cfg, "output_dir")
+    ).expanduser()
+    summary_dir = Path(
+        summary_dir_override or expect_str(train_cfg, "summary_dir")
+    ).expanduser()
+    resume_from = resume_from_override or expect_optional_str(train_cfg, "resume_from")
 
     materialize_train = expect_bool(runtime_cfg, "materialize_train")
     materialize_val = expect_bool(runtime_cfg, "materialize_val")
@@ -115,7 +124,11 @@ def prepare_dfine_teacher_run(
 
     tune_from = expect_optional_str(train_cfg, "tune_from")
 
-    if pretrained_cfg is not None and bool(pretrained_cfg.get("enabled", False)):
+    if (
+        resume_from is None
+        and pretrained_cfg is not None
+        and bool(pretrained_cfg.get("enabled", False))
+    ):
         pretrained_url = expect_str(pretrained_cfg, "url")
         pretrained_local_path = expect_str(pretrained_cfg, "local_path")
         tune_from = str(
@@ -132,6 +145,9 @@ def prepare_dfine_teacher_run(
         master_port=expect_int(train_cfg, "master_port"),
         seed=expect_int(train_cfg, "seed"),
         use_amp=expect_bool(train_cfg, "use_amp"),
+        output_dir=output_dir,
+        summary_dir=summary_dir,
+        resume_from=resume_from,
         tune_from=tune_from,
     )
 
@@ -361,6 +377,9 @@ def build_dfine_train_command(
     master_port: int,
     seed: int,
     use_amp: bool,
+    output_dir: str | Path,
+    summary_dir: str | Path,
+    resume_from: str | None,
     tune_from: str | None,
 ) -> list[str]:
     command = [
@@ -373,13 +392,19 @@ def build_dfine_train_command(
         "-c",
         str(Path(model_config).resolve()),
         f"--seed={seed}",
+        "--output-dir",
+        str(Path(output_dir).resolve()),
+        "--summary-dir",
+        str(Path(summary_dir).resolve()),
     ]
 
     if use_amp:
         command.append("--use-amp")
 
-    if tune_from is not None:
-        command.extend(["-t", tune_from])
+    if resume_from is not None:
+        command.extend(["-r", str(Path(resume_from).expanduser().resolve())])
+    elif tune_from is not None:
+        command.extend(["-t", str(Path(tune_from).expanduser().resolve())])
 
     return command
 

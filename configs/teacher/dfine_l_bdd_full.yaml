@@ -1,9 +1,9 @@
-name: "dfine_l_bdd010k"
+name: "dfine_l_bdd_full"
 teacher_type: "dfine"
 
 data:
-  config: "configs/data/bdd100k_det_010k.yaml"
-  coco_dir: "outputs/teacher_data/bdd100k_coco_010k"
+  config: "configs/data/bdd100k_det_full.yaml"
+  coco_dir: "outputs/teacher_data/bdd100k_coco_full"
   train_split: "train"
   val_split: "val"
 
@@ -14,7 +14,7 @@ dfine:
 
   model_size: "l"
   base_config: "configs/dfine/custom/objects365/dfine_hgnetv2_l_obj2custom.yml"
-  generated_config_dir: "outputs/teacher_configs/dfine_l_bdd010k"
+  generated_config_dir: "outputs/teacher_configs/dfine_l_bdd_full"
 
 pretrained:
   enabled: true
@@ -31,8 +31,8 @@ train:
   resume_from: null
   tune_from: null
 
-  output_dir: "runs/teachers/dfine_l_bdd010k"
-  summary_dir: "runs/teachers/dfine_l_bdd010k/tensorboard"
+  output_dir: "runs/teachers/dfine_l_bdd_full"
+  summary_dir: "runs/teachers/dfine_l_bdd_full/tensorboard"
 
 runtime:
   materialize_train: true
