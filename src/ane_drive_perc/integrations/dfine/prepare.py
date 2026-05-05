@@ -103,8 +103,7 @@ def prepare_dfine_teacher_run(
 
     if run and skip_materialize:
         raise ValueError(
-            "Cannot use --run with --skip-materialize because training needs "
-            "materialized COCO data."
+            "Cannot use --run with --skip-materialize because training needs materialized COCO data."
         )
 
     if skip_materialize:
@@ -243,6 +242,7 @@ def materialize_split(
         image_key=resolved.image_key,
         metadata_key=resolved.metadata_key,
         subset_manifest=resolved.local_manifest,
+        category_id_base=0,
     )
 
     print(
@@ -543,6 +543,7 @@ def build_dfine_train_command(
     command = [
         "env",
         f"CUDA_VISIBLE_DEVICES={devices}",
+        "MPLBACKEND=Agg",
         "torchrun",
         f"--master_port={master_port}",
         f"--nproc_per_node={nproc_per_node}",
