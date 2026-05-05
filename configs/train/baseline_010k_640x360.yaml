@@ -1,0 +1,43 @@
+experiment:
+  name: "baseline_ane_tiny_bdd010k_640x360_seed42"
+  seed: 42
+  output_dir: "runs/baseline_ane_tiny_bdd010k_640x360_seed42"
+
+data:
+  config: "configs/data/bdd100k_det_010k.yaml"
+
+input:
+  train_size:
+    height: 360
+    width: 640
+
+  eval_size:
+    height: 360
+    width: 640
+
+  preserve_aspect_ratio: true
+  letterbox_value: 114
+
+model:
+  type: "ane_yolo_tiny"
+  num_classes: 10
+
+train:
+  epochs: 100
+  batch_size: 32
+  num_workers: 4
+  optimizer: "adamw"
+  lr: 0.0005
+  weight_decay: 0.05
+  amp: true
+  ema: true
+
+eval:
+  interval_epochs: 1
+  conf_threshold: 0.001
+  nms_iou: 0.65
+  metrics:
+    - map50
+    - map50_95
+    - per_class_ap
+    - small_object_ap

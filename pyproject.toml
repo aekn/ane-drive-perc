@@ -7,11 +7,15 @@ requires-python = ">=3.12"
 dependencies = [
     "huggingface-hub>=1.13.0",
     "pillow>=12.2.0",
+    "pydantic>=2.13.3",
     "ultralytics>=8.4.46",
+    "webdataset>=1.0.2",
 ]
 
 [project.scripts]
 ane-drive-perc = "ane_drive_perc:main"
+ane-smoke-data = "ane_drive_perc.cli.smoke_data:main"
+ane-visualize-data = "ane_drive_perc.cli.visualize_data:main"
 
 [build-system]
 requires = ["uv_build>=0.9.21,<0.10.0"]
