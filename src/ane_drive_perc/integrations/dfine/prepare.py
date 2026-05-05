@@ -40,6 +40,7 @@ def prepare_dfine_teacher_run(
     output_dir_override: str | None = None,
     summary_dir_override: str | None = None,
     resume_from_override: str | None = None,
+    skip_materialize: bool = False,
 ) -> DfinePreparedRun:
     config = load_yaml(config_path)
 
@@ -100,19 +101,28 @@ def prepare_dfine_teacher_run(
         else install_requirements
     )
 
-    if materialize_train:
-        materialize_split(
-            data_config_path=data_config_path,
-            split=train_split,
-            output_dir=coco_dir,
+    if run and skip_materialize:
+        raise ValueError(
+            "Cannot use --run with --skip-materialize because training needs "
+            "materialized COCO data."
         )
 
-    if materialize_val:
-        materialize_split(
-            data_config_path=data_config_path,
-            split=val_split,
-            output_dir=coco_dir,
-        )
+    if skip_materialize:
+        print("skipping COCO materialization")
+    else:
+        if materialize_train:
+            materialize_split(
+                data_config_path=data_config_path,
+                split=train_split,
+                output_dir=coco_dir,
+            )
+
+        if materialize_val:
+            materialize_split(
+                data_config_path=data_config_path,
+                split=val_split,
+                output_dir=coco_dir,
+            )
 
     ensure_dfine_repo(
         repo_url=repo_url,
@@ -508,12 +518,13 @@ def apply_optimizer_overrides(
         if not isinstance(selector, str):
             continue
 
-        if "backbone" in selector and "norm" not in selector and "bn" not in selector:
+        if "backbone" in selector:
             group["lr"] = backbone_lr
 
-        if "encoder" in selector or "decoder" in selector:
-            if "norm" in selector or "bn" in selector:
-                group["weight_decay"] = encoder_decoder_norm_weight_decay
+        if ("encoder" in selector or "decoder" in selector) and (
+            "norm" in selector or "bn" in selector
+        ):
+            group["weight_decay"] = encoder_decoder_norm_weight_decay
 
 
 def build_dfine_train_command(

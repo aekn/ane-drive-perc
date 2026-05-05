@@ -8,6 +8,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", required=True)
     p.add_argument("--run", action="store_true")
     p.add_argument("--install-requirements", action="store_true")
+    p.add_argument("--skip-materialize", action="store_true")
     p.add_argument("--output-dir", default=None)
     p.add_argument("--summary-dir", default=None)
     p.add_argument("--resume-from", default=None)
@@ -25,4 +26,5 @@ def main() -> None:
         output_dir_override=args.output_dir,
         summary_dir_override=args.summary_dir,
         resume_from_override=args.resume_from,
+        skip_materialize=args.skip_materialize,
     )
