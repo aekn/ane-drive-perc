@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 from pathlib import Path
 
@@ -21,7 +19,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -34,28 +31,14 @@ def main() -> None:
     )
 
     saved = 0
-
     for batch in loader:
-        images = batch["images"]
-        targets = batch["targets"]
-
-        for image, target in zip(images, targets, strict=True):
-            image_id = str(target["image_id"])
-            safe_image_id = image_id.replace("/", "_")
-
-            output_path = output_dir / f"{saved:06d}_{safe_image_id}.jpg"
-
-            save_detection_visualization(
-                image=image,
-                target=target,
-                output_path=output_path,
-            )
-
+        for image, target in zip(batch["images"], batch["targets"], strict=True):
+            image_id = str(target["image_id"]).replace("/", "_")
+            output_path = output_dir / f"{saved:06d}_{image_id}.jpg"
+            save_detection_visualization(image=image, target=target, output_path=output_path)
             print(f"saved {output_path}")
-
             saved += 1
             if saved >= args.num_images:
-                print(f"Saved {saved} visualizations to {output_dir}")
+                print(f"saved {saved} visualizations to {output_dir}")
                 return
-
-    print(f"Dataset ended after saving {saved} visualizations to {output_dir}")
+    print(f"dataset ended after saving {saved} visualizations to {output_dir}")

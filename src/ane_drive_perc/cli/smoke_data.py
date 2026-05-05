@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import argparse
 
 from ane_drive_perc.data.build import build_detection_dataloader_from_train_config
@@ -17,7 +15,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-
     loader = build_detection_dataloader_from_train_config(
         args.config,
         split=args.split,
@@ -25,21 +22,17 @@ def main() -> None:
         num_workers=args.num_workers,
         shuffle_buffer=args.shuffle_buffer,
     )
-
     batch = next(iter(loader))
-
     images = batch["images"]
     targets = batch["targets"]
 
-    print("Loaded one detection batch.")
+    print("loaded one detection batch")
     print(f"  split: {args.split}")
-    print(f"  images shape: {tuple(images.shape)}")
-    print(f"  batch size: {len(targets)}")
-
+    print(f"  images: {tuple(images.shape)}")
+    print(f"  targets: {len(targets)}")
     for index, target in enumerate(targets):
-        print(f"  sample {index}:")
-        print(f"    image_id: {target['image_id']}")
-        print(f"    boxes: {tuple(target['boxes'].shape)}")
-        print(f"    labels: {tuple(target['labels'].shape)}")
-        print(f"    orig_size: {target['orig_size']}")
-        print(f"    input_size: {target['input_size']}")
+        print(
+            f"  sample {index}: image_id={target['image_id']} "
+            f"boxes={tuple(target['boxes'].shape)} labels={tuple(target['labels'].shape)} "
+            f"orig_size={target['orig_size']} input_size={target['input_size']}"
+        )

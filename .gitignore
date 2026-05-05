@@ -1,23 +1,27 @@
-data/raw/
-data/bdd/
-data/hf/
-data/materialized/
-data/qa/
-data/coco/
-data/yolo/
-
-runs/
-
 .venv/
 __pycache__/
 *.py[cod]
-
-.env
 
 .DS_Store
 
 .trash/
 
 .cache/
-
 outputs/
+runs/
+artifacts/
+checkpoints/
+exports/
+data/
+datasets/
+teacher_cache/
+
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.mlmodel
+*.safetensors
+
+.env
+.env.*

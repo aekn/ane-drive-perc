@@ -31,46 +31,35 @@ class ResizeDetectionSample:
 
         if not isinstance(image, torch.Tensor):
             raise TypeError("Expected sample['image'] to be a torch.Tensor.")
-
         if image.ndim != 3:
             raise ValueError(f"Expected image shape CxHxW, got {tuple(image.shape)}.")
 
-        _, orig_height, orig_width = image.shape
+        resized_image, transform = (
+            self._letterbox(image)
+            if self.config.preserve_aspect_ratio
+            else self._direct_resize(image)
+        )
 
-        if self.config.preserve_aspect_ratio:
-            resized_image, transform = self._letterbox(image)
-        else:
-            resized_image, transform = self._direct_resize(image)
-
-        boxes = target["boxes"]
-        resized_boxes = resize_boxes_xyxy(boxes, transform)
-        resized_boxes = clip_boxes_xyxy(
+        resized_boxes = resize_boxes_xyxy(target["boxes"], transform)
+        target["boxes"] = clip_boxes_xyxy(
             resized_boxes,
             height=self.config.height,
             width=self.config.width,
         )
-
-        target["boxes"] = resized_boxes
         target["input_size"] = (self.config.height, self.config.width)
         target["resize_transform"] = transform
-
-        return {
-            "image": resized_image,
-            "target": target,
-        }
+        return {"image": resized_image, "target": target}
 
     def _direct_resize(
         self, image: torch.Tensor
     ) -> tuple[torch.Tensor, ResizeTransform]:
         _, orig_height, orig_width = image.shape
-
         resized = F.interpolate(
             image.unsqueeze(0),
             size=(self.config.height, self.config.width),
             mode="bilinear",
             align_corners=False,
         ).squeeze(0)
-
         transform = ResizeTransform(
             orig_height=orig_height,
             orig_width=orig_width,
@@ -78,20 +67,12 @@ class ResizeDetectionSample:
             new_width=self.config.width,
             scale_y=self.config.height / orig_height,
             scale_x=self.config.width / orig_width,
-            pad_top=0.0,
-            pad_left=0.0,
         )
-
         return resized, transform
 
     def _letterbox(self, image: torch.Tensor) -> tuple[torch.Tensor, ResizeTransform]:
         channels, orig_height, orig_width = image.shape
-
-        scale = min(
-            self.config.width / orig_width,
-            self.config.height / orig_height,
-        )
-
+        scale = min(self.config.width / orig_width, self.config.height / orig_height)
         resized_width = int(round(orig_width * scale))
         resized_height = int(round(orig_height * scale))
 
@@ -106,13 +87,10 @@ class ResizeDetectionSample:
             (channels, self.config.height, self.config.width),
             fill_value=self.config.letterbox_value,
         )
-
         pad_top = float((self.config.height - resized_height) // 2)
         pad_left = float((self.config.width - resized_width) // 2)
-
         top = int(pad_top)
         left = int(pad_left)
-
         canvas[:, top : top + resized_height, left : left + resized_width] = resized
 
         transform = ResizeTransform(
@@ -125,5 +103,4 @@ class ResizeDetectionSample:
             pad_top=pad_top,
             pad_left=pad_left,
         )
-
         return canvas, transform

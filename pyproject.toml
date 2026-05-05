@@ -6,16 +6,24 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "huggingface-hub>=1.13.0",
+    "numpy>=2.4.4",
     "pillow>=12.2.0",
     "pydantic>=2.13.3",
+    "pyyaml>=6.0.3",
+    "rich>=15.0.0",
+    "torch>=2.11.0",
     "ultralytics>=8.4.46",
     "webdataset>=1.0.2",
 ]
 
 [project.scripts]
-ane-drive-perc = "ane_drive_perc:main"
+ane-inspect-shards = "ane_drive_perc.cli.inspect_shards:main"
+ane-inspect-wds = "ane_drive_perc.cli.inspect_wds:main"
+ane-materialize-coco = "ane_drive_perc.cli.materialize_coco:main"
+ane-overfit-tiny = "ane_drive_perc.cli.overfit_tiny:main"
 ane-smoke-data = "ane_drive_perc.cli.smoke_data:main"
 ane-visualize-data = "ane_drive_perc.cli.visualize_data:main"
+ane-train-teacher-dfine = "ane_drive_perc.cli.train_teacher_dfine:main"
 
 [build-system]
 requires = ["uv_build>=0.9.21,<0.10.0"]
@@ -23,3 +31,20 @@ build-backend = "uv_build"
 
 [tool.basedpyright]
 typeCheckingMode = "basic"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.20.2",
+    "pytest>=9.0.3",
+    "ruff>=0.15.12",
+    "types-pyyaml>=6.0.12.20260408",
+]
+teacher = [
+    "calflops>=0.3.2",
+    "faster-coco-eval>=1.7.2",
+    "loguru>=0.7.3",
+    "scipy>=1.17.1",
+    "tensorboard>=2.20.0",
+    "torchvision>=0.26.0",
+    "transformers>=5.7.0",
+]
