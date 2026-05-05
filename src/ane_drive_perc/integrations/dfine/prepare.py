@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import subprocess
+from collections.abc import MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -6,6 +9,7 @@ from typing import Any
 import yaml
 
 from ane_drive_perc.config.access import (
+    ConfigMapping,
     expect_bool,
     expect_dict,
     expect_int,
@@ -69,6 +73,23 @@ def prepare_dfine_teacher_run(
     ).expanduser()
     resume_from = resume_from_override or expect_optional_str(train_cfg, "resume_from")
 
+    input_size = get_int(train_cfg, "input_size", default=640)
+    train_batch_size = get_int(train_cfg, "train_batch_size", default=32)
+    val_batch_size = get_int(train_cfg, "val_batch_size", default=train_batch_size * 2)
+    num_workers = get_int(train_cfg, "num_workers", default=8)
+
+    epochs = get_int(train_cfg, "epochs", default=80)
+    close_aug_epoch = get_int(train_cfg, "close_aug_epoch", default=max(0, epochs - 8))
+
+    lr = get_float(train_cfg, "lr", default=0.00025)
+    backbone_lr = get_float(train_cfg, "backbone_lr", default=0.0000125)
+    weight_decay = get_float(train_cfg, "weight_decay", default=0.000125)
+    encoder_decoder_norm_weight_decay = get_float(
+        train_cfg,
+        "encoder_decoder_norm_weight_decay",
+        default=0.0,
+    )
+
     materialize_train = expect_bool(runtime_cfg, "materialize_train")
     materialize_val = expect_bool(runtime_cfg, "materialize_val")
 
@@ -111,7 +132,9 @@ def prepare_dfine_teacher_run(
         train_split=train_split,
         val_split=val_split,
         num_classes=10,
-        num_workers=4,
+        num_workers=num_workers,
+        train_batch_size=train_batch_size,
+        val_batch_size=val_batch_size,
     )
 
     generated_model_config = generated_config_dir / "dfine_hgnetv2_l_bdd100k.yml"
@@ -120,23 +143,30 @@ def prepare_dfine_teacher_run(
         output_path=generated_model_config,
         dataset_config_path=generated_dataset_config,
         output_dir=output_dir,
+        input_size=input_size,
+        train_batch_size=train_batch_size,
+        val_batch_size=val_batch_size,
+        num_workers=num_workers,
+        epochs=epochs,
+        close_aug_epoch=close_aug_epoch,
+        lr=lr,
+        backbone_lr=backbone_lr,
+        weight_decay=weight_decay,
+        encoder_decoder_norm_weight_decay=encoder_decoder_norm_weight_decay,
     )
 
     tune_from = expect_optional_str(train_cfg, "tune_from")
 
-    if (
-        resume_from is None
-        and pretrained_cfg is not None
-        and bool(pretrained_cfg.get("enabled", False))
-    ):
-        pretrained_url = expect_str(pretrained_cfg, "url")
-        pretrained_local_path = expect_str(pretrained_cfg, "local_path")
-        tune_from = str(
-            ensure_local_checkpoint(
-                url=pretrained_url,
-                local_path=pretrained_local_path,
-            ).resolve()
-        )
+    if resume_from is None and pretrained_cfg is not None:
+        if bool(pretrained_cfg.get("enabled", False)):
+            pretrained_url = expect_str(pretrained_cfg, "url")
+            pretrained_local_path = expect_str(pretrained_cfg, "local_path")
+            tune_from = str(
+                ensure_local_checkpoint(
+                    url=pretrained_url,
+                    local_path=pretrained_local_path,
+                ).resolve()
+            )
 
     train_command = build_dfine_train_command(
         model_config=generated_model_config,
@@ -255,6 +285,8 @@ def write_dfine_dataset_config(
     val_split: str,
     num_classes: int,
     num_workers: int,
+    train_batch_size: int,
+    val_batch_size: int,
 ) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -284,6 +316,7 @@ def write_dfine_dataset_config(
                 },
             },
             "shuffle": True,
+            "total_batch_size": train_batch_size,
             "num_workers": num_workers,
             "drop_last": True,
             "collate_fn": {
@@ -305,6 +338,7 @@ def write_dfine_dataset_config(
                 },
             },
             "shuffle": False,
+            "total_batch_size": val_batch_size,
             "num_workers": num_workers,
             "drop_last": False,
             "collate_fn": {
@@ -323,6 +357,16 @@ def write_dfine_model_config(
     output_path: str | Path,
     dataset_config_path: str | Path,
     output_dir: str | Path,
+    input_size: int,
+    train_batch_size: int,
+    val_batch_size: int,
+    num_workers: int,
+    epochs: int,
+    close_aug_epoch: int,
+    lr: float,
+    backbone_lr: float,
+    weight_decay: float,
+    encoder_decoder_norm_weight_decay: float,
 ) -> None:
     base_path = Path(base_config_path)
     if not base_path.exists():
@@ -361,12 +405,115 @@ def write_dfine_model_config(
     generated_config = dict(base_config)
     generated_config["__include__"] = rewritten_includes
     generated_config["output_dir"] = str(Path(output_dir).resolve())
+    generated_config["epochs"] = epochs
+
+    apply_dataloader_overrides(
+        generated_config,
+        input_size=input_size,
+        train_batch_size=train_batch_size,
+        val_batch_size=val_batch_size,
+        num_workers=num_workers,
+        close_aug_epoch=close_aug_epoch,
+    )
+    apply_optimizer_overrides(
+        generated_config,
+        lr=lr,
+        backbone_lr=backbone_lr,
+        weight_decay=weight_decay,
+        encoder_decoder_norm_weight_decay=encoder_decoder_norm_weight_decay,
+    )
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
 
     with output.open("w", encoding="utf-8") as f:
         yaml.safe_dump(generated_config, f, sort_keys=False)
+
+
+def apply_dataloader_overrides(
+    config: dict[str, Any],
+    *,
+    input_size: int,
+    train_batch_size: int,
+    val_batch_size: int,
+    num_workers: int,
+    close_aug_epoch: int,
+) -> None:
+    train_dataloader = ensure_mapping(config, "train_dataloader")
+    train_dataloader["total_batch_size"] = train_batch_size
+    train_dataloader["num_workers"] = num_workers
+
+    train_dataset = ensure_mapping(train_dataloader, "dataset")
+    train_transforms = ensure_mapping(train_dataset, "transforms")
+    train_transforms["ops"] = [
+        {"type": "RandomPhotometricDistort", "p": 0.5},
+        {"type": "RandomZoomOut", "fill": 0},
+        {"type": "RandomIoUCrop", "p": 0.8},
+        {"type": "SanitizeBoundingBoxes", "min_size": 1},
+        {"type": "RandomHorizontalFlip"},
+        {"type": "Resize", "size": [input_size, input_size]},
+        {"type": "SanitizeBoundingBoxes", "min_size": 1},
+        {"type": "ConvertPILImage", "dtype": "float32", "scale": True},
+        {"type": "ConvertBoxes", "fmt": "cxcywh", "normalize": True},
+    ]
+
+    train_policy = ensure_mapping(train_transforms, "policy")
+    train_policy["name"] = "stop_epoch"
+    train_policy["epoch"] = close_aug_epoch
+    train_policy["ops"] = [
+        "RandomPhotometricDistort",
+        "RandomZoomOut",
+        "RandomIoUCrop",
+    ]
+
+    collate_fn = ensure_mapping(train_dataloader, "collate_fn")
+    collate_fn["type"] = "BatchImageCollateFunction"
+    collate_fn["base_size"] = input_size
+    collate_fn["base_size_repeat"] = 4
+    collate_fn["stop_epoch"] = close_aug_epoch
+
+    val_dataloader = ensure_mapping(config, "val_dataloader")
+    val_dataloader["total_batch_size"] = val_batch_size
+    val_dataloader["num_workers"] = num_workers
+
+    val_dataset = ensure_mapping(val_dataloader, "dataset")
+    val_transforms = ensure_mapping(val_dataset, "transforms")
+    val_transforms["ops"] = [
+        {"type": "Resize", "size": [input_size, input_size]},
+        {"type": "ConvertPILImage", "dtype": "float32", "scale": True},
+    ]
+
+
+def apply_optimizer_overrides(
+    config: dict[str, Any],
+    *,
+    lr: float,
+    backbone_lr: float,
+    weight_decay: float,
+    encoder_decoder_norm_weight_decay: float,
+) -> None:
+    optimizer = ensure_mapping(config, "optimizer")
+    optimizer["lr"] = lr
+    optimizer["weight_decay"] = weight_decay
+
+    params = optimizer.get("params")
+    if not isinstance(params, list):
+        return
+
+    for group in params:
+        if not isinstance(group, MutableMapping):
+            continue
+
+        selector = group.get("params")
+        if not isinstance(selector, str):
+            continue
+
+        if "backbone" in selector and "norm" not in selector and "bn" not in selector:
+            group["lr"] = backbone_lr
+
+        if "encoder" in selector or "decoder" in selector:
+            if "norm" in selector or "bn" in selector:
+                group["weight_decay"] = encoder_decoder_norm_weight_decay
 
 
 def build_dfine_train_command(
@@ -470,6 +617,32 @@ def print_prepared_run(prepared: DfinePreparedRun) -> None:
     print(f"  train_script: {prepared.generated_train_script}")
     print("  command:")
     print("    " + " ".join(shell_quote(part) for part in prepared.train_command))
+
+
+def ensure_mapping(mapping: dict[str, Any], key: str) -> dict[str, Any]:
+    value = mapping.get(key)
+    if value is None:
+        value = {}
+        mapping[key] = value
+
+    if not isinstance(value, dict):
+        raise TypeError(f"Expected {key!r} to be a mapping.")
+
+    return value
+
+
+def get_int(mapping: ConfigMapping, key: str, *, default: int) -> int:
+    value = mapping.get(key, default)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise TypeError(f"Expected {key!r} to be an integer.")
+    return value
+
+
+def get_float(mapping: ConfigMapping, key: str, *, default: float) -> float:
+    value = mapping.get(key, default)
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        raise TypeError(f"Expected {key!r} to be numeric.")
+    return float(value)
 
 
 def shell_quote(value: str) -> str:

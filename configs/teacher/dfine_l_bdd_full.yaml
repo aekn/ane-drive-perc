@@ -28,6 +28,19 @@ train:
   seed: 42
   use_amp: true
 
+  input_size: 896
+  train_batch_size: 16
+  val_batch_size: 32
+  num_workers: 8
+
+  epochs: 80
+  close_aug_epoch: 72
+
+  lr: 0.000125
+  backbone_lr: 0.00000625
+  weight_decay: 0.000125
+  encoder_decoder_norm_weight_decay: 0.0
+
   resume_from: null
   tune_from: null
 
