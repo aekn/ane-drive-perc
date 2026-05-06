@@ -10,8 +10,8 @@ from PIL import Image, ImageDraw, ImageFont
 from torchvision.ops import batched_nms, nms
 
 from adp.config import write_resolved_config
-from adp.model.dfine import build_model
 from adp.model.dfine.postprocess import DFINEPostProcessor
+from adp.model.registry import get as get_model_spec
 from adp.train.augment import build_val_transforms
 from adp.train.dataset import CocoDetectionDataset
 from adp.utils.paths import ensure_run_paths
@@ -284,18 +284,31 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
         category_id_base=int(cfg.coco.category_id_base),
     )
 
-    model = build_model(
-        model_name=str(cfg.train.model_name),
+    from omegaconf import OmegaConf as _OC
+
+    model_key = _OC.select(cfg, "train.model", default=None)
+    if model_key is None:
+        model_key = f"dfine_{cfg.train.model_name}"
+    spec = get_model_spec(str(model_key))
+
+    model = spec.build_model(
         num_classes=int(cfg.train.num_classes),
         enable_mask_head=False,
         device=device,
         img_size=list(img_size),
         pretrained_model_path=None,
+        **({"backbone_pretrained": False} if model_key.startswith("ane_") else {}),
     )
 
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    state_dict = checkpoint.get("model", checkpoint)
-    model.load_state_dict(state_dict)
+    state_dict = checkpoint.get("ema") or checkpoint.get("model") or checkpoint
+    own = model.state_dict()
+    state_dict = {
+        k: v
+        for k, v in state_dict.items()
+        if not (k in own and own[k].shape != v.shape)
+    }
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
 
     postprocessor = DFINEPostProcessor(

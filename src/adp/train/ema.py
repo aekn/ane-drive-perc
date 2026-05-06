@@ -1,13 +1,3 @@
-"""Exponential moving average of model parameters with warmup-aware momentum.
-
-Closely follows D-FINE-seg's recipe:
-    momentum(t) = base * (1 - exp(-t / 2000))
-
-so the EMA tracks closely early in training and progressively decouples.
-Distillation later will instantiate this against the student only.
-"""
-from __future__ import annotations
-
 import math
 from copy import deepcopy
 

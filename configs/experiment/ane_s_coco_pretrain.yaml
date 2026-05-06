@@ -1,0 +1,52 @@
+# @package _global_
+# ANE-S detector pretrain on COCO-2017 @ 640x640. Output checkpoint is the
+# starting point for ane_s_bdd_finetune.
+# uv run python -m adp.train.train +experiment=ane_s_coco_pretrain
+
+defaults:
+  - /default
+  - _self_
+
+experiment:
+  name: ane_s_coco_pretrain_640x640
+  seed: 42
+
+data:
+  package_name: coco2017
+
+train:
+  model: ane_s
+  num_classes: 80
+  img_size: [640, 640]
+
+  coco_root: ${paths.data}/exports/coco2017/coco
+  train_annotations: instances_train2017.json
+  val_annotations: instances_val2017.json
+  pretrained_path: null
+
+  epochs: 12
+  batch_size: 24
+  num_workers: 4
+  device: cuda
+  amp_dtype: bfloat16
+  clip_grad_norm: 0.1
+
+  base_lr: 0.0004
+  backbone_lr: 0.00004
+  weight_decay: 0.0001
+  betas: [0.9, 0.999]
+  label_smoothing: 0.0
+
+  scheduler: onecycle
+  warmup_pct: 0.05
+  freeze_backbone_epochs: 0
+  augment: true
+  use_ema: true
+  ema_momentum: 0.9998
+
+  eval_every: 1
+  num_top_queries: 300
+  score_thresholds: [0.05, 0.1, 0.3]
+
+  nan_recovery: true
+  nan_max_consecutive: 10

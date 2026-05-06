@@ -24,6 +24,8 @@ def _to_device(
 
 
 class Trainer:
+    """Standard supervised trainer for DETR-ilke detectors."""
+
     def __init__(
         self,
         *,

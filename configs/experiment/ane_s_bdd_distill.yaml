@@ -1,0 +1,68 @@
+# @package _global_
+# ANE-S student distilled from a frozen DFINE-M teacher on BDD-30k @ 544x960.
+# uv run python -m adp.distill.train_distill +experiment=ane_s_bdd_distill
+
+defaults:
+  - /default
+  - _self_
+
+experiment:
+  name: ane_s_bdd30k_distill
+  seed: 42
+
+data:
+  package_name: bdd_det10_train30k_s42
+
+train:
+  model: ane_s
+  num_classes: 10
+  img_size: [544, 960]
+
+  pretrained_path: null
+
+  epochs: 30
+  batch_size: 12
+  num_workers: 4
+  device: cuda
+  amp_dtype: bfloat16
+  clip_grad_norm: 0.1
+
+  base_lr: 0.0002
+  backbone_lr: 0.00002
+  weight_decay: 0.0001
+  betas: [0.9, 0.999]
+  label_smoothing: 0.0
+
+  scheduler: onecycle
+  warmup_pct: 0.05
+  freeze_backbone_epochs: 0
+  augment: true
+  use_ema: true
+  ema_momentum: 0.9999
+
+  eval_every: 2
+  num_top_queries: 300
+  score_thresholds: [0.05, 0.1, 0.3]
+
+  nan_recovery: true
+  nan_max_consecutive: 10
+
+distill:
+  teacher_model: dfine_m
+  teacher_checkpoint: ???   # required override
+  use_teacher_ema: true
+
+  gt_weight: 1.0
+  box_weight: 1.5
+  cls_weight: 0.5
+  cls_temperature: 2.0
+
+  fdr_weight: 0.25
+  fdr_temperature: 1.0
+  reg_max: 32
+
+  aifi_peak_weight: 20.0
+  aifi_warmup_frac: 0.10
+  aifi_ramp_frac: 0.20
+
+  use_quality_weights: true

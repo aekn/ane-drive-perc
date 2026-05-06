@@ -1,0 +1,51 @@
+# @package _global_
+# ANE-S student, GT-supervised finetune on BDD-30k @ 544x960.
+# uv run python -m adp.train.train +experiment=ane_s_bdd_finetune
+
+defaults:
+  - /default
+  - _self_
+
+experiment:
+  name: ane_s_bdd30k_544x960_finetune
+  seed: 42
+
+data:
+  package_name: bdd_det10_train30k_s42
+
+train:
+  model: ane_s
+  num_classes: 10
+  img_size: [544, 960]
+
+  pretrained_path: null
+
+  epochs: 40
+  batch_size: 16
+  num_workers: 4
+  device: cuda
+  amp_dtype: bfloat16
+  clip_grad_norm: 0.1
+
+  base_lr: 0.0002
+  backbone_lr: 0.00002
+  weight_decay: 0.0001
+  betas: [0.9, 0.999]
+  label_smoothing: 0.0
+
+  scheduler: onecycle
+  warmup_pct: 0.05
+
+  freeze_backbone_epochs: 0
+
+  augment: true
+
+  use_ema: true
+  ema_momentum: 0.9999
+
+  eval_every: 2
+  num_top_queries: 300
+  score_thresholds: [0.05, 0.1, 0.3]
+
+  nan_recovery: true
+  nan_max_consecutive: 10

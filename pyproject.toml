@@ -17,6 +17,8 @@ dependencies = [
     "opencv-python-headless>=4.10.0",
     "pycocotools>=2.0.8",
     "tqdm>=4.66.0",
+    "timm>=1.0.26",
+    "coremltools>=9.0",
 ]
 
 [project.scripts]

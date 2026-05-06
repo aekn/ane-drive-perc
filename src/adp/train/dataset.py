@@ -1,18 +1,3 @@
-"""COCO-format detection dataset for D-FINE training.
-
-Reads our `adp.data.export_coco` output (`<coco_root>/annotations/instances_*.json`
-and image symlinks/files). Yields (image_tensor, target_dict) pairs in the
-format D-FINE's HungarianMatcher expects:
-
-  target = {
-    "boxes":     Tensor [N, 4]  — normalized cxcywh in the augmented input frame
-    "labels":    Tensor [N]     — long, 0-indexed (subtracts category_id_base)
-    "image_id":  Tensor scalar  — for COCO eval
-    "orig_size": Tensor [2]     — (h, w) of the source image, for unscaling at eval
-  }
-"""
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Any

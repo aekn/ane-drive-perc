@@ -1,10 +1,3 @@
-"""Thin pycocotools wrapper for D-FINE detection evaluation.
-
-The accumulator collects per-image predictions in COCO submission format.
-`summarize()` runs COCOeval and returns the standard 12 metrics.
-"""
-from __future__ import annotations
-
 import contextlib
 import io
 from pathlib import Path

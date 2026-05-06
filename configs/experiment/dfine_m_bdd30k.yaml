@@ -1,0 +1,50 @@
+# @package _global_
+# DFINE-M teacher on BDD-30k @ 544x960.
+# uv run python -m adp.train.train +experiment=dfine_m_bdd30k
+
+defaults:
+  - /default
+  - _self_
+
+experiment:
+  name: dfine_m_bdd30k_544x960_teacher
+  seed: 42
+
+data:
+  package_name: bdd_det10_train30k_s42
+
+train:
+  model: dfine_m
+  num_classes: 10
+  img_size: [544, 960]
+
+  pretrained_dir: ${project.root}/data/pretrained
+  pretrained_dataset: obj2coco
+  pretrained_path: ${train.pretrained_dir}/dfine_m_${train.pretrained_dataset}.pt
+
+  epochs: 30
+  batch_size: 64
+  num_workers: 8
+  device: cuda
+  amp_dtype: bfloat16
+  clip_grad_norm: 0.1
+
+  base_lr: 0.0002
+  backbone_lr: 0.00002
+  weight_decay: 0.0001
+  betas: [0.9, 0.999]
+  label_smoothing: 0.0
+
+  scheduler: onecycle
+  warmup_pct: 0.05
+  freeze_backbone_epochs: 0
+  augment: true
+  use_ema: true
+  ema_momentum: 0.9999
+
+  eval_every: 2
+  num_top_queries: 300
+  score_thresholds: [0.05, 0.1, 0.3]
+
+  nan_recovery: true
+  nan_max_consecutive: 10

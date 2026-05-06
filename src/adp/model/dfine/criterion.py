@@ -625,11 +625,18 @@ class DFINECriterion(nn.Module):
         # Get the matching union set across all decoder layers.
         if "aux_outputs" in outputs:
             indices_aux_list, cached_indices, cached_indices_enc = [], [], []
-            for i, aux_outputs in enumerate(outputs["aux_outputs"] + [outputs["pre_outputs"]]):
+            # ANE-student compat: ``pre_outputs`` and ``enc_aux_outputs`` come from
+            # D-FINE's encoder query selection — the v1 ANE student skips encoder
+            # query selection, so these are optional. When absent, the matcher
+            # pool is just the ``aux_outputs`` from each decoder layer.
+            aux_pool = list(outputs["aux_outputs"])
+            if "pre_outputs" in outputs:
+                aux_pool.append(outputs["pre_outputs"])
+            for i, aux_outputs in enumerate(aux_pool):
                 indices_aux = self.matcher(aux_outputs, targets)["indices"]
                 cached_indices.append(indices_aux)
                 indices_aux_list.append(indices_aux)
-            for i, aux_outputs in enumerate(outputs["enc_aux_outputs"]):
+            for i, aux_outputs in enumerate(outputs.get("enc_aux_outputs", [])):
                 indices_enc = self.matcher(aux_outputs, targets)["indices"]
                 cached_indices_enc.append(indices_enc)
                 indices_aux_list.append(indices_enc)
