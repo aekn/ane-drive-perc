@@ -77,6 +77,7 @@ samples:
 
 validation:
   require_images: true
+  verify_images: true
 
 package:
   root: ${paths.data}/packages

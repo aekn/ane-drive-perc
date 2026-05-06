@@ -135,7 +135,7 @@ def _apply_visualization_nms(
     """Apply NMS for human-readable visualization only.
 
     COCO evaluation should keep using raw postprocessed model predictions.
-    This removes duplicate boxes from the rendered images so debugging is easier.
+    This removes duplicate boxes from rendered images so debugging is easier.
     """
     if len(scores) == 0:
         return torch.empty((0,), dtype=torch.long)
