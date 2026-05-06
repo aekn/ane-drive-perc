@@ -1,16 +1,17 @@
+defaults:
+  - _self_
+
 project:
-  name: adp
   root: ${oc.env:PWD}
 
 experiment:
-  name: debug
+  name: dev
   seed: 42
 
 paths:
+  data: ${project.root}/data
   runs: ${project.root}/runs
-  packages: ${project.root}/data/packages
-  downloads: ${project.root}/data/downloads
-  staged: ${project.root}/data/staged
+  downloads: ${paths.data}/downloads
 
 run:
   dir: ${paths.runs}/${experiment.name}
@@ -18,9 +19,10 @@ run:
   debug_dir: ${run.dir}/debug
 
 data:
-  raw_root: ${project.root}/data/raw/bdd100k/bdd100k
-  root: ${project.root}/data/adp/bdd_det10_train10k_s42
   package_name: bdd_det10_train10k_s42
+  root: ${paths.data}/adp/${data.package_name}
+
+  raw_root: ${paths.data}/raw/bdd100k/bdd100k
 
   images:
     train: ${data.raw_root}/images/100k/train
@@ -30,12 +32,13 @@ data:
     train: ${data.raw_root}/labels/train
     val: ${data.raw_root}/labels/val
 
-  manifests:
-    train: ${data.root}/manifests/train.jsonl
-    val: ${data.root}/manifests/val.jsonl
-    overfit16: ${data.root}/manifests/overfit16.jsonl
-
+  manifests_dir: ${data.root}/manifests
   metadata_dir: ${data.root}/metadata
+
+  manifests:
+    train: ${data.manifests_dir}/train.jsonl
+    val: ${data.manifests_dir}/val.jsonl
+    overfit16: ${data.manifests_dir}/overfit16.jsonl
 
 subset:
   train_limit: 10000
@@ -68,22 +71,13 @@ bdd:
     traffic light: traffic light
     traffic sign: traffic sign
 
-validation:
-  require_images: true
-  verify_images: false
-  max_errors: 20
-
 samples:
-  split: train
   limit: 32
-  grid_columns: 4
-  thumbnail_size: 320
+  seed: ${experiment.seed}
 
 package:
-  split: train
-  output_dir: ${paths.packages}/${data.package_name}
-  tar_path: ${paths.packages}/${data.package_name}.tar
-  checksum_path: ${paths.packages}/${data.package_name}.sha256
+  root: ${paths.data}/packages
+  split: all
   overwrite: true
 
 hf:
@@ -91,7 +85,6 @@ hf:
   repo_type: dataset
   revision: main
   token_env: HF_TOKEN
-
   files:
     train_package: packages/bdd_det10_train10k_s42.tar
     train_checksum: checksums/bdd_det10_train10k_s42.sha256
@@ -99,8 +92,8 @@ hf:
     val_checksum: checksums/bdd_det10_val.sha256
 
 stage:
-  output_dir: ${paths.staged}/bdd_det10_train10k_s42
-  download_dir: ${paths.downloads}/hf/bdd_det10_train10k_s42
+  output_dir: ${paths.data}/staged/${data.package_name}
+  download_dir: ${paths.downloads}/hf/${data.package_name}
   overwrite: true
 
 export:
@@ -114,37 +107,43 @@ coco:
 
 train:
   # Model
-  model_name: l                          # n | s | m | l | x
+  model_name: l
   num_classes: 10
-  img_size: [640, 640]                   # [height, width]
+  img_size: [640, 640]
   pretrained_dir: ${project.root}/data/pretrained
-  pretrained_dataset: obj2coco           # coco | obj2coco
+  pretrained_dataset: obj2coco
   pretrained_path: ${train.pretrained_dir}/dfine_${train.model_name}_${train.pretrained_dataset}.pt
 
-  # Data
+  # Data. Consumes COCO export from adp.data.export_coco.
   coco_root: ${coco.output_dir}
   train_annotations: instances_train.json
   val_annotations: instances_val.json
-  augment: true
 
   # Loop
   epochs: 50
   batch_size: 8
   num_workers: 4
-  device: cuda                           # cuda | cpu | mps
-  amp_dtype: bfloat16                    # bfloat16 | float16 | float32
+  device: cuda
+  amp_dtype: bfloat16
   clip_grad_norm: 0.1
   seed: ${experiment.seed}
 
-  # Optimization
-  scheduler: onecycle                    # onecycle | constant
+  # Optim
   base_lr: 0.00016
   backbone_lr: 0.00001
   weight_decay: 0.000125
   betas: [0.9, 0.999]
   label_smoothing: 0.0
+
+  # Scheduler
+  scheduler: onecycle       # onecycle | constant
   warmup_pct: 0.05
+
+  # Backbone schedule
   freeze_backbone_epochs: 0
+
+  # Augmentation
+  augment: true
 
   # EMA
   use_ema: true
@@ -153,7 +152,6 @@ train:
   # Eval
   eval_every: 1
   num_top_queries: 300
-  score_thresholds: [0.01, 0.05, 0.1, 0.3, 0.5]
 
   # Robustness
   nan_recovery: true
@@ -170,6 +168,8 @@ eval:
   device: ${train.device}
   score_threshold: 0.3
   max_images: 16
+  max_predictions_per_image: 80
+  draw_prediction_labels: false
 
 hydra:
   output_subdir: null

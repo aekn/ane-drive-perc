@@ -1,11 +1,12 @@
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 import hydra
 import torch
 from omegaconf import DictConfig
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from adp.config import write_resolved_config
 from adp.model.dfine import build_model
@@ -13,6 +14,22 @@ from adp.model.dfine.postprocess import DFINEPostProcessor
 from adp.train.augment import build_val_transforms
 from adp.train.dataset import CocoDetectionDataset
 from adp.utils.paths import ensure_run_paths
+
+
+PRED_COLORS = {
+    0: "red",  # pedestrian
+    1: "orange",  # rider
+    2: "deepskyblue",  # car
+    3: "magenta",  # truck
+    4: "yellow",  # bus
+    5: "cyan",  # train
+    6: "violet",  # motorcycle
+    7: "dodgerblue",  # bicycle
+    8: "white",  # traffic light
+    9: "hotpink",  # traffic sign
+}
+
+GT_COLOR = "lime"
 
 
 def _class_names(cfg: DictConfig) -> list[str]:
@@ -46,14 +63,118 @@ def _to_xyxy_from_cxcywh_norm(
 def _draw_box(
     draw: ImageDraw.ImageDraw,
     box: torch.Tensor,
-    label: str,
     *,
     color: str,
     width: int,
 ) -> None:
     x1, y1, x2, y2 = [float(v) for v in box]
     draw.rectangle([x1, y1, x2, y2], outline=color, width=width)
-    draw.text((x1 + 2, max(0, y1 - 14)), label, fill=color)
+
+
+def _draw_text(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[int, int],
+    text: str,
+    *,
+    color: str,
+    font: ImageFont.ImageFont,
+) -> None:
+    draw.text(xy, text, fill=color, font=font)
+
+
+def _prediction_color(label_id: int) -> str:
+    return PRED_COLORS.get(label_id, "red")
+
+
+def _make_canvas_with_legend(
+    image: Image.Image,
+    *,
+    class_names: list[str],
+    gt_counts: Counter[int],
+    pred_counts: Counter[int],
+    top_predictions: list[tuple[int, float]],
+    score_threshold: float,
+) -> Image.Image:
+    legend_width = 360
+    padding = 14
+    line_height = 20
+
+    canvas = Image.new(
+        "RGB",
+        (image.width + legend_width, image.height),
+        color=(24, 24, 24),
+    )
+    canvas.paste(image, (0, 0))
+
+    draw = ImageDraw.Draw(canvas)
+    font = ImageFont.load_default()
+
+    x = image.width + padding
+    y = padding
+
+    _draw_text(draw, (x, y), "Legend", color="white", font=font)
+    y += line_height + 4
+
+    _draw_text(draw, (x, y), "GT boxes: green", color=GT_COLOR, font=font)
+    y += line_height
+
+    _draw_text(
+        draw,
+        (x, y),
+        f"Pred boxes: class color, score >= {score_threshold:.2f}",
+        color="white",
+        font=font,
+    )
+    y += line_height + 8
+
+    _draw_text(draw, (x, y), "Prediction classes", color="white", font=font)
+    y += line_height
+
+    for class_id, class_name in enumerate(class_names):
+        color = _prediction_color(class_id)
+        count = pred_counts.get(class_id, 0)
+        draw.rectangle([x, y + 4, x + 12, y + 16], outline=color, width=2)
+        _draw_text(
+            draw,
+            (x + 20, y),
+            f"{class_id}: {class_name} ({count})",
+            color=color,
+            font=font,
+        )
+        y += line_height
+
+    y += 8
+    _draw_text(draw, (x, y), "GT counts", color=GT_COLOR, font=font)
+    y += line_height
+
+    for class_id, count in sorted(gt_counts.items()):
+        class_name = class_names[class_id]
+        _draw_text(
+            draw,
+            (x, y),
+            f"{class_name}: {count}",
+            color=GT_COLOR,
+            font=font,
+        )
+        y += line_height
+
+    y += 8
+    _draw_text(draw, (x, y), "Top predictions", color="white", font=font)
+    y += line_height
+
+    for class_id, score in top_predictions[:10]:
+        color = _prediction_color(class_id)
+        class_name = class_names[class_id]
+        _draw_text(
+            draw,
+            (x, y),
+            f"{class_name}: {score:.2f}",
+            color=color,
+            font=font,
+        )
+        y += line_height
+
+    return canvas
 
 
 def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
@@ -111,7 +232,10 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
 
     score_threshold = float(cfg.eval.score_threshold)
     max_images = min(int(cfg.eval.max_images), len(dataset))
+    max_predictions_per_image = int(getattr(cfg.eval, "max_predictions_per_image", 80))
+    draw_prediction_labels = bool(getattr(cfg.eval, "draw_prediction_labels", False))
 
+    font = ImageFont.load_default()
     written: list[str] = []
 
     with torch.no_grad():
@@ -132,17 +256,11 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
                 width=orig_w,
                 height=orig_h,
             )
-            gt_labels = target["labels"].cpu().tolist()
+            gt_labels = [int(v) for v in target["labels"].cpu().tolist()]
+            gt_counts = Counter(gt_labels)
 
-            for box, label_id in zip(gt_boxes, gt_labels):
-                class_name = class_names[int(label_id)]
-                _draw_box(
-                    draw,
-                    box,
-                    f"GT {class_name}",
-                    color="lime",
-                    width=2,
-                )
+            for box in gt_boxes:
+                _draw_box(draw, box, color=GT_COLOR, width=2)
 
             batch = image_tensor.unsqueeze(0).to(device)
             orig_sizes = torch.tensor(
@@ -159,20 +277,56 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
             boxes = result["boxes"].detach().cpu()
 
             keep = scores >= score_threshold
+            kept_scores = scores[keep]
+            kept_labels = labels[keep]
+            kept_boxes = boxes[keep]
 
-            for box, label_id, score in zip(boxes[keep], labels[keep], scores[keep]):
-                class_name = class_names[int(label_id)]
-                _draw_box(
-                    draw,
-                    box,
-                    f"P {class_name} {float(score):.2f}",
-                    color="red",
-                    width=3,
+            if len(kept_scores) > max_predictions_per_image:
+                top_scores, top_indices = torch.topk(
+                    kept_scores,
+                    k=max_predictions_per_image,
                 )
+                kept_scores = top_scores
+                kept_labels = kept_labels[top_indices]
+                kept_boxes = kept_boxes[top_indices]
+
+            pred_label_ids = [int(v) for v in kept_labels.tolist()]
+            pred_counts = Counter(pred_label_ids)
+            top_predictions = [
+                (int(label_id), float(score))
+                for label_id, score in zip(kept_labels.tolist(), kept_scores.tolist())
+            ]
+            top_predictions.sort(key=lambda item: item[1], reverse=True)
+
+            for box, label_id, score in zip(kept_boxes, kept_labels, kept_scores):
+                class_id = int(label_id)
+                color = _prediction_color(class_id)
+
+                _draw_box(draw, box, color=color, width=3)
+
+                if draw_prediction_labels:
+                    x1, y1, _, _ = [float(v) for v in box]
+                    class_name = class_names[class_id]
+                    _draw_text(
+                        draw,
+                        (int(x1) + 2, max(0, int(y1) - 12)),
+                        f"{class_name} {float(score):.2f}",
+                        color=color,
+                        font=font,
+                    )
+
+            canvas = _make_canvas_with_legend(
+                image,
+                class_names=class_names,
+                gt_counts=gt_counts,
+                pred_counts=pred_counts,
+                top_predictions=top_predictions,
+                score_threshold=score_threshold,
+            )
 
             safe_name = str(image_info["file_name"]).replace("/", "_")
             output_path = output_dir / f"{idx:03d}_{safe_name}"
-            image.save(output_path)
+            canvas.save(output_path)
             written.append(str(output_path))
 
     report = {
@@ -181,6 +335,8 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
         "annotations_file": annotations_file,
         "output_dir": str(output_dir),
         "score_threshold": score_threshold,
+        "max_predictions_per_image": max_predictions_per_image,
+        "draw_prediction_labels": draw_prediction_labels,
         "image_count": len(written),
         "images": written,
     }
@@ -190,7 +346,8 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
 
     print(f"[adp] wrote {len(written)} prediction visualizations: {output_dir}")
     print(f"[adp] wrote report: {report_path}")
-    print("[adp] green = ground truth; red = prediction")
+    print("[adp] ground truth = green")
+    print("[adp] predictions = class colors shown in legend")
 
     return report
 
