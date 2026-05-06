@@ -176,6 +176,8 @@ eval:
   draw_prediction_labels: false
   vis_min_width: 1280
   vis_min_height: 720
+  nms_iou_threshold: 0.6
+  class_agnostic_nms: false
 
 artifacts:
   run_name: ${experiment.name}

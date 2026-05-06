@@ -7,6 +7,7 @@ import hydra
 import torch
 from omegaconf import DictConfig
 from PIL import Image, ImageDraw, ImageFont
+from torchvision.ops import batched_nms, nms
 
 from adp.config import write_resolved_config
 from adp.model.dfine import build_model
@@ -123,6 +124,31 @@ def _prediction_color(label_id: int) -> str:
     return PRED_COLORS.get(label_id, "red")
 
 
+def _apply_visualization_nms(
+    boxes: torch.Tensor,
+    scores: torch.Tensor,
+    labels: torch.Tensor,
+    *,
+    iou_threshold: float,
+    class_agnostic: bool,
+) -> torch.Tensor:
+    """Apply NMS for human-readable visualization only.
+
+    COCO evaluation should keep using raw postprocessed model predictions.
+    This removes duplicate boxes from the rendered images so debugging is easier.
+    """
+    if len(scores) == 0:
+        return torch.empty((0,), dtype=torch.long)
+
+    if iou_threshold <= 0.0 or iou_threshold >= 1.0:
+        return torch.arange(len(scores), dtype=torch.long)
+
+    if class_agnostic:
+        return nms(boxes, scores, iou_threshold)
+
+    return batched_nms(boxes, scores, labels, iou_threshold)
+
+
 def _make_canvas_with_legend(
     image: Image.Image,
     *,
@@ -131,6 +157,7 @@ def _make_canvas_with_legend(
     pred_counts: Counter[int],
     top_predictions: list[tuple[int, float]],
     score_threshold: float,
+    nms_iou_threshold: float,
 ) -> Image.Image:
     legend_width = 520
     padding = 22
@@ -160,6 +187,15 @@ def _make_canvas_with_legend(
         draw,
         (x, y),
         f"Pred boxes: class color, score >= {score_threshold:.2f}",
+        color="white",
+        font=font,
+    )
+    y += line_height
+
+    _draw_text(
+        draw,
+        (x, y),
+        f"Visualization NMS IoU: {nms_iou_threshold:.2f}",
         color="white",
         font=font,
     )
@@ -274,6 +310,8 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
     draw_prediction_labels = bool(getattr(cfg.eval, "draw_prediction_labels", False))
     vis_min_width = int(getattr(cfg.eval, "vis_min_width", 1280))
     vis_min_height = int(getattr(cfg.eval, "vis_min_height", 720))
+    nms_iou_threshold = float(getattr(cfg.eval, "nms_iou_threshold", 0.6))
+    class_agnostic_nms = bool(getattr(cfg.eval, "class_agnostic_nms", False))
 
     font = _load_font(14)
     written: list[str] = []
@@ -330,6 +368,17 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
             kept_labels = labels[keep]
             kept_boxes = boxes[keep]
 
+            nms_keep = _apply_visualization_nms(
+                kept_boxes,
+                kept_scores,
+                kept_labels,
+                iou_threshold=nms_iou_threshold,
+                class_agnostic=class_agnostic_nms,
+            )
+            kept_scores = kept_scores[nms_keep]
+            kept_labels = kept_labels[nms_keep]
+            kept_boxes = kept_boxes[nms_keep]
+
             if len(kept_scores) > max_predictions_per_image:
                 top_scores, top_indices = torch.topk(
                     kept_scores,
@@ -373,6 +422,7 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
                 pred_counts=pred_counts,
                 top_predictions=top_predictions,
                 score_threshold=score_threshold,
+                nms_iou_threshold=nms_iou_threshold,
             )
 
             safe_name = str(image_info["file_name"]).replace("/", "_")
@@ -386,6 +436,8 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
         "annotations_file": annotations_file,
         "output_dir": str(output_dir),
         "score_threshold": score_threshold,
+        "nms_iou_threshold": nms_iou_threshold,
+        "class_agnostic_nms": class_agnostic_nms,
         "max_predictions_per_image": max_predictions_per_image,
         "draw_prediction_labels": draw_prediction_labels,
         "vis_min_width": vis_min_width,
@@ -401,6 +453,8 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
     print(f"[adp] wrote report: {report_path}")
     print("[adp] ground truth = green")
     print("[adp] predictions = class colors shown in legend")
+    print(f"[adp] visualization NMS IoU: {nms_iou_threshold:.2f}")
+    print(f"[adp] class-agnostic NMS: {class_agnostic_nms}")
 
     return report
 
