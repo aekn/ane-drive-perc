@@ -168,6 +168,8 @@ eval:
   batch_size: 8
   num_workers: 4
   device: ${train.device}
+  score_threshold: 0.3
+  max_images: 16
 
 hydra:
   output_subdir: null
