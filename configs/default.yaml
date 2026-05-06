@@ -75,6 +75,9 @@ samples:
   limit: 32
   seed: ${experiment.seed}
 
+validation:
+  require_images: true
+
 package:
   root: ${paths.data}/packages
   split: all
@@ -152,6 +155,7 @@ train:
   # Eval
   eval_every: 1
   num_top_queries: 300
+  score_thresholds: [0.05, 0.1, 0.3]
 
   # Robustness
   nan_recovery: true
