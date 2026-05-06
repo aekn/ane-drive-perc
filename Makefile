@@ -1,6 +1,6 @@
 ARGS ?=
 
-.PHONY: inspect-raw materialize validate visualize package stage export-coco train-dfine visualize-predictions
+.PHONY: inspect-raw materialize validate visualize package stage export-coco train-dfine visualize-predictions package-run
 
 inspect-raw:
 	uv run python -m adp.data.inspect_raw $(ARGS)
@@ -28,3 +28,6 @@ train-dfine:
 
 visualize-predictions:
 	uv run python -m adp.eval.visualize_predictions $(ARGS)
+
+package-run:
+	uv run python -m adp.utils.package_run $(ARGS)

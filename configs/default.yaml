@@ -170,6 +170,13 @@ eval:
   max_images: 16
   max_predictions_per_image: 80
   draw_prediction_labels: false
+  vis_min_width: 1280
+  vis_min_height: 720
+
+artifacts:
+  run_name: ${experiment.name}
+  output_root: ${project.root}/artifacts
+  overwrite: true
 
 hydra:
   output_subdir: null

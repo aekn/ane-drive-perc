@@ -46,6 +46,24 @@ def _image_lookup(coco_root: Path, annotations_file: str) -> dict[int, dict[str,
     return {int(image["id"]): image for image in data["images"]}
 
 
+def _load_font(size: int) -> ImageFont.ImageFont:
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial.ttf",
+    ]
+
+    for path in candidates:
+        font_path = Path(path)
+        if font_path.exists():
+            return ImageFont.truetype(str(font_path), size=size)
+
+    return ImageFont.load_default()
+
+
 def _to_xyxy_from_cxcywh_norm(
     boxes: torch.Tensor,
     *,
@@ -58,6 +76,25 @@ def _to_xyxy_from_cxcywh_norm(
     x2 = (cx + 0.5 * w) * width
     y2 = (cy + 0.5 * h) * height
     return torch.stack([x1, y1, x2, y2], dim=-1)
+
+
+def _resize_for_visualization(
+    image: Image.Image,
+    *,
+    min_width: int,
+    min_height: int,
+) -> tuple[Image.Image, float, float]:
+    width, height = image.size
+
+    scale = max(min_width / width, min_height / height, 1.0)
+    new_width = int(round(width * scale))
+    new_height = int(round(height * scale))
+
+    if scale == 1.0:
+        return image, 1.0, 1.0
+
+    resized = image.resize((new_width, new_height), resample=Image.Resampling.BICUBIC)
+    return resized, new_width / width, new_height / height
 
 
 def _draw_box(
@@ -95,9 +132,9 @@ def _make_canvas_with_legend(
     top_predictions: list[tuple[int, float]],
     score_threshold: float,
 ) -> Image.Image:
-    legend_width = 360
-    padding = 14
-    line_height = 20
+    legend_width = 520
+    padding = 22
+    line_height = 28
 
     canvas = Image.new(
         "RGB",
@@ -107,13 +144,14 @@ def _make_canvas_with_legend(
     canvas.paste(image, (0, 0))
 
     draw = ImageDraw.Draw(canvas)
-    font = ImageFont.load_default()
+    title_font = _load_font(20)
+    font = _load_font(16)
 
     x = image.width + padding
     y = padding
 
-    _draw_text(draw, (x, y), "Legend", color="white", font=font)
-    y += line_height + 4
+    _draw_text(draw, (x, y), "Legend", color="white", font=title_font)
+    y += line_height + 8
 
     _draw_text(draw, (x, y), "GT boxes: green", color=GT_COLOR, font=font)
     y += line_height
@@ -125,27 +163,27 @@ def _make_canvas_with_legend(
         color="white",
         font=font,
     )
-    y += line_height + 8
+    y += line_height + 12
 
-    _draw_text(draw, (x, y), "Prediction classes", color="white", font=font)
-    y += line_height
+    _draw_text(draw, (x, y), "Prediction classes", color="white", font=title_font)
+    y += line_height + 4
 
     for class_id, class_name in enumerate(class_names):
         color = _prediction_color(class_id)
         count = pred_counts.get(class_id, 0)
-        draw.rectangle([x, y + 4, x + 12, y + 16], outline=color, width=2)
+        draw.rectangle([x, y + 5, x + 18, y + 23], outline=color, width=3)
         _draw_text(
             draw,
-            (x + 20, y),
+            (x + 30, y),
             f"{class_id}: {class_name} ({count})",
             color=color,
             font=font,
         )
         y += line_height
 
-    y += 8
-    _draw_text(draw, (x, y), "GT counts", color=GT_COLOR, font=font)
-    y += line_height
+    y += 12
+    _draw_text(draw, (x, y), "GT counts", color=GT_COLOR, font=title_font)
+    y += line_height + 4
 
     for class_id, count in sorted(gt_counts.items()):
         class_name = class_names[class_id]
@@ -158,9 +196,9 @@ def _make_canvas_with_legend(
         )
         y += line_height
 
-    y += 8
-    _draw_text(draw, (x, y), "Top predictions", color="white", font=font)
-    y += line_height
+    y += 12
+    _draw_text(draw, (x, y), "Top predictions", color="white", font=title_font)
+    y += line_height + 4
 
     for class_id, score in top_predictions[:10]:
         color = _prediction_color(class_id)
@@ -234,8 +272,10 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
     max_images = min(int(cfg.eval.max_images), len(dataset))
     max_predictions_per_image = int(getattr(cfg.eval, "max_predictions_per_image", 80))
     draw_prediction_labels = bool(getattr(cfg.eval, "draw_prediction_labels", False))
+    vis_min_width = int(getattr(cfg.eval, "vis_min_width", 1280))
+    vis_min_height = int(getattr(cfg.eval, "vis_min_height", 720))
 
-    font = ImageFont.load_default()
+    font = _load_font(14)
     written: list[str] = []
 
     with torch.no_grad():
@@ -249,6 +289,12 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
             image_path = coco_root / str(image_info["file_name"])
 
             image = Image.open(image_path).convert("RGB")
+            image, scale_x, scale_y = _resize_for_visualization(
+                image,
+                min_width=vis_min_width,
+                min_height=vis_min_height,
+            )
+
             draw = ImageDraw.Draw(image)
 
             gt_boxes = _to_xyxy_from_cxcywh_norm(
@@ -256,6 +302,9 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
                 width=orig_w,
                 height=orig_h,
             )
+            scale_tensor = torch.tensor([scale_x, scale_y, scale_x, scale_y])
+            gt_boxes = gt_boxes * scale_tensor
+
             gt_labels = [int(v) for v in target["labels"].cpu().tolist()]
             gt_counts = Counter(gt_labels)
 
@@ -289,6 +338,8 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
                 kept_scores = top_scores
                 kept_labels = kept_labels[top_indices]
                 kept_boxes = kept_boxes[top_indices]
+
+            kept_boxes = kept_boxes * scale_tensor
 
             pred_label_ids = [int(v) for v in kept_labels.tolist()]
             pred_counts = Counter(pred_label_ids)
@@ -337,6 +388,8 @@ def visualize_predictions(cfg: DictConfig) -> dict[str, object]:
         "score_threshold": score_threshold,
         "max_predictions_per_image": max_predictions_per_image,
         "draw_prediction_labels": draw_prediction_labels,
+        "vis_min_width": vis_min_width,
+        "vis_min_height": vis_min_height,
         "image_count": len(written),
         "images": written,
     }
