@@ -1,0 +1,175 @@
+project:
+  name: adp
+  root: ${oc.env:PWD}
+
+experiment:
+  name: debug
+  seed: 42
+
+paths:
+  runs: ${project.root}/runs
+  packages: ${project.root}/data/packages
+  downloads: ${project.root}/data/downloads
+  staged: ${project.root}/data/staged
+
+run:
+  dir: ${paths.runs}/${experiment.name}
+  reports_dir: ${run.dir}/reports
+  debug_dir: ${run.dir}/debug
+
+data:
+  raw_root: ${project.root}/data/raw/bdd100k/bdd100k
+  root: ${project.root}/data/adp/bdd_det10_train10k_s42
+  package_name: bdd_det10_train10k_s42
+
+  images:
+    train: ${data.raw_root}/images/100k/train
+    val: ${data.raw_root}/images/100k/val
+
+  labels:
+    train: ${data.raw_root}/labels/train
+    val: ${data.raw_root}/labels/val
+
+  manifests:
+    train: ${data.root}/manifests/train.jsonl
+    val: ${data.root}/manifests/val.jsonl
+    overfit16: ${data.root}/manifests/overfit16.jsonl
+
+  metadata_dir: ${data.root}/metadata
+
+subset:
+  train_limit: 10000
+  seed: ${experiment.seed}
+  strategy: random  # random | stratified
+
+classes:
+  names:
+    - pedestrian
+    - rider
+    - car
+    - truck
+    - bus
+    - train
+    - motorcycle
+    - bicycle
+    - traffic light
+    - traffic sign
+
+bdd:
+  category_map:
+    person: pedestrian
+    rider: rider
+    car: car
+    truck: truck
+    bus: bus
+    train: train
+    motor: motorcycle
+    bike: bicycle
+    traffic light: traffic light
+    traffic sign: traffic sign
+
+validation:
+  require_images: true
+  verify_images: false
+  max_errors: 20
+
+samples:
+  split: train
+  limit: 32
+  grid_columns: 4
+  thumbnail_size: 320
+
+package:
+  split: train
+  output_dir: ${paths.packages}/${data.package_name}
+  tar_path: ${paths.packages}/${data.package_name}.tar
+  checksum_path: ${paths.packages}/${data.package_name}.sha256
+  overwrite: true
+
+hf:
+  repo_id: aekn/adp-bdd
+  repo_type: dataset
+  revision: main
+  token_env: HF_TOKEN
+
+  files:
+    train_package: packages/bdd_det10_train10k_s42.tar
+    train_checksum: checksums/bdd_det10_train10k_s42.sha256
+    val_package: packages/bdd_det10_val.tar
+    val_checksum: checksums/bdd_det10_val.sha256
+
+stage:
+  output_dir: ${paths.staged}/bdd_det10_train10k_s42
+  download_dir: ${paths.downloads}/hf/bdd_det10_train10k_s42
+  overwrite: true
+
+export:
+  root: ${project.root}/data/exports/${data.package_name}
+  copy_images: false
+  overwrite: true
+
+coco:
+  output_dir: ${export.root}/coco
+  category_id_base: 1
+
+train:
+  # Model
+  model_name: l                          # n | s | m | l | x
+  num_classes: 10
+  img_size: [640, 640]                   # [height, width]
+  pretrained_dir: ${project.root}/data/pretrained
+  pretrained_dataset: obj2coco           # coco | obj2coco
+  pretrained_path: ${train.pretrained_dir}/dfine_${train.model_name}_${train.pretrained_dataset}.pt
+
+  # Data
+  coco_root: ${coco.output_dir}
+  train_annotations: instances_train.json
+  val_annotations: instances_val.json
+  augment: true
+
+  # Loop
+  epochs: 50
+  batch_size: 8
+  num_workers: 4
+  device: cuda                           # cuda | cpu | mps
+  amp_dtype: bfloat16                    # bfloat16 | float16 | float32
+  clip_grad_norm: 0.1
+  seed: ${experiment.seed}
+
+  # Optimization
+  scheduler: onecycle                    # onecycle | constant
+  base_lr: 0.00016
+  backbone_lr: 0.00001
+  weight_decay: 0.000125
+  betas: [0.9, 0.999]
+  label_smoothing: 0.0
+  warmup_pct: 0.05
+  freeze_backbone_epochs: 0
+
+  # EMA
+  use_ema: true
+  ema_momentum: 0.9998
+
+  # Eval
+  eval_every: 1
+  num_top_queries: 300
+  score_thresholds: [0.01, 0.05, 0.1, 0.3, 0.5]
+
+  # Robustness
+  nan_recovery: true
+  nan_max_consecutive: 10
+
+  # Output
+  checkpoints_dir: ${run.dir}/checkpoints
+  metrics_path: ${run.dir}/metrics.jsonl
+
+eval:
+  checkpoint_path: ${train.checkpoints_dir}/best.pt
+  batch_size: 8
+  num_workers: 4
+  device: ${train.device}
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .

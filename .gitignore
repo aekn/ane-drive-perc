@@ -1,25 +1,55 @@
-.venv/
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+*.so
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+/.venv/
+/venv/
+/env/
+
+/.env
+/.env.*
+!/.env.example
 
 .DS_Store
 
-.trash/
+/data/
+/runs/
+/outputs/
+/artifacts/
+/checkpoints/
+/pretrained/
 
-.cache/
-outputs/
-runs/
-artifacts/
-exports/
-datasets/
-teacher_cache/
+/.cache/
+/.huggingface/
+/hf_cache/
+
+*.log
+/logs/
 
 *.pt
 *.pth
 *.ckpt
 *.onnx
-*.mlmodel
 *.safetensors
+*.mlpackage/
+*.mlmodel
+*.mlmodelc/
 
-.env
-.env.*
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.jsonl.tmp
+
+/tmp/
+/temp/
+/test_coco.json
+/test_res.json
