@@ -92,17 +92,18 @@ class ANEDecoder(nn.Module):
                 (H_in // 16, W_in // 16),
                 (H_in // 32, W_in // 32),
             ][:num_levels]
-            parts = []
-            for level, (h, w) in enumerate(self._static_levels):
-                sincos = build_2d_sincos_pos_embed(
-                    h, w, embed_dim, device=torch.device("cpu")
-                )
-                level_emb = self.level_embed[level].view(1, -1, 1, 1)
-                parts.append(sincos + level_emb)
-            self._mem_pos_cache = torch.cat(parts, dim=-1)
+            sincos_parts = [
+                build_2d_sincos_pos_embed(h, w, embed_dim, device=torch.device("cpu"))
+                for h, w in self._static_levels
+            ]
+            self._mem_pos_cache = torch.cat(sincos_parts, dim=-1)  # leaf, no grad_fn
             self._mem_pos_cache_key = tuple(self._static_levels)
+            self._static_level_token_counts: list[int] | None = [
+                h * w for h, w in self._static_levels
+            ]
         else:
             self._static_levels = None
+            self._static_level_token_counts = None
 
         self.register_buffer("_project_static", torch.zeros(0), persistent=False)
         self._project_is_static = False
@@ -121,30 +122,46 @@ class ANEDecoder(nn.Module):
         bias = _bias_init_with_prob(0.01)
         for head in self.cls_heads:
             nn.init.constant_(head.proj.bias, bias)
-        # Final box head bias init to zero so initial deltas around ref are zero-mean.
         for head in self.box_heads:
             nn.init.constant_(head.mlp.layers[-1].weight, 0.0)
             nn.init.constant_(head.mlp.layers[-1].bias, 0.0)
 
     def _build_memory_pos(self, encoder_feats: Sequence[Tensor]) -> Tensor:
         if self._static_levels is not None and self._mem_pos_cache.numel() > 0:
-            return self._mem_pos_cache.to(encoder_feats[0].device)
+            sincos = self._mem_pos_cache.to(encoder_feats[0].device)
+            offset = 0
+            out = []
+            for level, n in enumerate(self._static_level_token_counts):
+                seg = sincos[..., offset : offset + n]
+                le = self.level_embed[level].view(1, -1, 1, 1)
+                out.append(seg + le)
+                offset += n
+            return torch.cat(out, dim=-1)
 
         spatial_key = tuple((int(f.shape[-2]), int(f.shape[-1])) for f in encoder_feats)
         if self._mem_pos_cache_key == spatial_key and self._mem_pos_cache.numel() > 0:
-            return self._mem_pos_cache
+            sincos = self._mem_pos_cache
+        else:
+            device = encoder_feats[0].device
+            sincos_parts = [
+                build_2d_sincos_pos_embed(
+                    int(f.shape[-2]), int(f.shape[-1]), self.embed_dim, device=device
+                )
+                for f in encoder_feats
+            ]
+            sincos = torch.cat(sincos_parts, dim=-1)
+            self._mem_pos_cache = sincos
+            self._mem_pos_cache_key = spatial_key
 
-        device = encoder_feats[0].device
-        parts = []
+        offset = 0
+        out = []
         for level, feat in enumerate(encoder_feats):
-            h, w = int(feat.shape[-2]), int(feat.shape[-1])
-            sincos = build_2d_sincos_pos_embed(h, w, self.embed_dim, device=device)
-            level_emb = self.level_embed[level].view(1, -1, 1, 1)
-            parts.append(sincos + level_emb)
-        pos = torch.cat(parts, dim=-1)
-        self._mem_pos_cache = pos
-        self._mem_pos_cache_key = spatial_key
-        return pos
+            n = int(feat.shape[-2]) * int(feat.shape[-1])
+            seg = sincos[..., offset : offset + n]
+            le = self.level_embed[level].view(1, -1, 1, 1)
+            out.append(seg + le)
+            offset += n
+        return torch.cat(out, dim=-1)
 
     def forward(
         self,
