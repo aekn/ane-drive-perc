@@ -155,7 +155,7 @@ class Trainer:
 
             with self._autocast():
                 loss_dict = self._compute_step_loss(images, targets)
-                loss = sum(loss_dict.values())
+                loss = sum(v for k, v in loss_dict.items() if not k.endswith("_telemetry"))
 
             if not torch.isfinite(loss):
                 self._consecutive_nan += 1
