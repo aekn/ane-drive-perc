@@ -11,7 +11,7 @@ from adp.model.registry import get as get_model_spec
 
 
 class _ExportWrapper(nn.Module):
-    """Wraps the detector to return tensors instead of dicts (tracing requirement)."""
+    """Wraps the detector to return tensors instead of dicts."""
 
     def __init__(self, detector: nn.Module) -> None:
         super().__init__()
@@ -27,6 +27,7 @@ def _build_deploy_model(
     img_size: tuple[int, int],
     num_classes: int,
     backbone_pretrained: bool,
+    checkpoint: Path | None = None,
 ) -> nn.Module:
     spec = get_model_spec("ane_s")
     model = spec.build_model(
@@ -35,8 +36,24 @@ def _build_deploy_model(
         img_size=list(img_size),
         backbone_pretrained=backbone_pretrained,
     )
+
+    if checkpoint is not None:
+        payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+        # prefer EMA weights when available
+        state = payload.get("ema") or payload["model"]
+        missing, unexpected = model.load_state_dict(state, strict=True)
+        if missing:
+            logger.warning(f"missing keys: {missing}")
+        if unexpected:
+            logger.warning(f"unexpected keys: {unexpected}")
+        epoch = payload.get("epoch", "?")
+        score = payload.get("best_score", "?")
+        logger.info(
+            f"loaded checkpoint: {checkpoint.name} (epoch {epoch}, best_score {score})"
+        )
+
     model.eval()
-    # reparamterize model (fold BN into preceding conv, RepMixer to single depthwise conv)
+    # reparam the model (fold BN into preceding conv, RepMixer to single depthwise conv)
     model.deploy()
     n_params = sum(p.numel() for p in model.parameters())
     logger.info(
@@ -59,10 +76,10 @@ def _trace_model(model: nn.Module, img_size: tuple[int, int]) -> torch.jit.Scrip
 def _convert_to_coreml(
     traced: torch.jit.ScriptModule, *, img_size: tuple[int, int]
 ) -> "ct.models.MLModel":
-    import coremltools as ct  # macOS-only
+    import coremltools as ct
 
     h, w = img_size
-    logger.info("converting to CoreML (FP16, iOS17 deployment target)...")
+    logger.info("converting to CoreML...")
     mlmodel = ct.convert(
         traced,
         inputs=[ct.TensorType(name="image", shape=(1, 3, h, w), dtype=np.float32)],
@@ -102,7 +119,7 @@ def _benchmark(
             results[unit_name] = float("nan")
             continue
 
-        # warmup so the runtime allocates buffers and (lil)jits anything it needs.
+        # warmup so the runtime allocates buffers and (lil)jits anything it needs
         for _ in range(5):
             m.predict({"image": example})
 
@@ -124,13 +141,16 @@ def main() -> None:
     parser.add_argument(
         "--backbone-pretrained",
         action="store_true",
-        help="download FastViT-T8 ImageNet weights (slower; not needed for this validation)",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
     )
     parser.add_argument(
         "--out",
         type=Path,
         default=Path("artifacts/ane_s.mlpackage"),
-        help="output .mlpackage path",
     )
     parser.add_argument("--n-iter", type=int, default=50)
     args = parser.parse_args()
@@ -143,6 +163,7 @@ def main() -> None:
         img_size=img_size,
         num_classes=args.num_classes,
         backbone_pretrained=args.backbone_pretrained,
+        checkpoint=args.checkpoint,
     )
 
     traced = _trace_model(model, img_size)

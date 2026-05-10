@@ -1,9 +1,5 @@
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.so
-.Python
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -11,7 +7,6 @@ __pycache__/
 htmlcov/
 
 /.venv/
-/venv/
 /env/
 
 /.env
@@ -47,9 +42,8 @@ htmlcov/
 *.tar.gz
 *.tgz
 *.zip
-*.jsonl.tmp
 
-/tmp/
-/temp/
 /test_coco.json
 /test_res.json
+
+/ios/
