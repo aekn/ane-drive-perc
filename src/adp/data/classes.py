@@ -41,4 +41,5 @@ def build_class_map(cfg: DictConfig) -> ClassMap:
 
 
 def build_source_category_map(cfg: DictConfig) -> dict[str, str]:
+    """Return the BDD-native category to ADP-canonical category map."""
     return {str(k): str(v) for k, v in cfg.bdd.category_map.items()}
