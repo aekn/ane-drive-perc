@@ -1,103 +1,120 @@
-# ANE Driving Perception
+# ANE-S
 
-Research codebase for driving perception models optimized for the Apple Neural Engine (ANE).
+ANE-S is a small DETR-style object detector I built to explore deployment-aware
+driving perception on Apple hardware. The model detects the 10 BDD100K object
+classes at 544x960, and the best student is deployed as an FP16 Core ML MLProgram
+in an iPhone camera app.
 
-> Status: Early/preliminary. Scope is currently 2D object detection on a 30K subset of BDD100K. Models were not trained to convergence due to compute constraints.
+This is an exploratory project, not a production driving system or a competitive
+detection benchmark. The reported student runs used a 30k-image subset of
+BDD100K for 40 epochs, and the validation curve was still improving at the end
+of training.
 
-## Overview
+## Results
 
-The objective is a compact, fast object detector for driving scenes that runs entirely on the ANE, enabling real-time inference on Apple Silicon without GPU or CPU fallback.
+COCO-style bounding-box AP on the 10k-image BDD100K validation split. Values
+below are percentage points.
 
-Training utilizes a 30K subset of the BDD100K dataset at 544x960 resolution. Two training approaches are compared for the student model (ANE-S):
-1. GT-only: Trained from scratch using standard D-FINE detection loss.
-2. Distilled: Trained against a larger, frozen teacher model (DFINE-M) using knowledge distillation.
+| Student run | AP | AP50 |
+| --- | ---: | ---: |
+| Ground-truth supervision only | 7.30 | 16.93 |
+| D-FINE-M distillation | 9.35 | 21.29 |
 
-## ANE-Resident Design
+Distillation improved AP by 28.1% relative to the ground-truth-only run. The
+exact Colab commands used for these runs are in
+`notebooks/ane_s_bdd30k_544x960_bs24_e40.ipynb` and
+`notebooks/ane_s_distill_dfine_m.ipynb`.
 
-A model is "ANE-resident" when the entire forward pass executes on the ANE without CPU/GPU fallbacks. This requires specific architectural constraints:
-- Convolutions only: Linear layers are replaced with Conv2d 1x1.
-- Channels-first 4D layout: Tensors are shaped (B, C, 1, S).
-- Custom normalization: Normalization occurs over the channel axis.
-- Supported ops only: Deformable attention, grid_sample, and einsum are avoided.
-- Reparameterization: Multi-branch structures are collapsed into single convolutions at export.
+The student is still undertrained: its best result was the final evaluated
+epoch (39), so these numbers should be read as results from a limited experiment
+rather than a converged model.
 
-## Models
+## Model
 
-### Teacher: DFINE-M
-The medium variant of the D-FINE detector. Initialized from Objects365 pretrained weights and fine-tuned on the 30K BDD100K subset. Used solely as a frozen teacher for distillation.
+ANE-S has about 6.9M parameters and uses:
 
-### Student: ANE-S
-A compact 6.97M parameter detector built with ANE-friendly primitives.
-- Backbone: FastViT-T8 (loaded via timm).
-- Encoder: Hybrid encoder with a single AIFI transformer block and CSP-Rep blocks.
-- Decoder: 3-layer DETR-style decoder with 300 queries and an FGL (Fine-Grained Localization) box head.
+- a FastViT-T8 backbone with ImageNet-pretrained weights and feature maps at strides 8, 16, and 32;
+- a 192-channel hybrid encoder with an AIFI block on the deepest scale and FPN/PAN feature fusion;
+- a 3-layer, 300-query decoder with 8 attention heads and fine-grained box distributions;
+- ANE-oriented attention blocks that keep tensors in `(B, C, 1, S)` layout, use 1x1 `Conv2d` projections, channel-axis normalization, and `matmul` attention.
 
-## Distillation
+For distillation, I use a frozen D-FINE-M teacher trained on the same BDD100K
+split. Student and teacher queries are independently matched to ground-truth
+objects, then queries assigned to the same ground-truth object are paired.
+Training combines the normal supervised loss with box, class-distribution,
+fine-grained regression-distribution, and deepest-scale feature distillation
+losses.
 
-Because DETR models predict an unordered set of queries, the distillation pipeline uses Hungarian matching to pair student and teacher queries that are predicting the same ground-truth object.
+## Core ML and iPhone deployment
 
-- Query-level Distillation (on matched pairs):
-  - Box and class KD: KL divergence on class logits, plus L1 and GIoU on boxes.
-  - FDR feature distillation: KL divergence on the FGL edge distribution bins.
+The export path reparameterizes supported FastViT/convolutional blocks, traces
+the fixed 1x3x544x960 model, and converts it to an FP16 Core ML MLProgram with
+an RGB `ImageType` input. The image input uses a `1/255` scale, and the iOS app
+uses Vision `.scaleFill` preprocessing to match the direct-resize training
+pipeline.
 
-- Spatial Distillation (no matching required):
-  - AIFI attention transfer: Cosine similarity matching the 2D attention maps of the 1/32 scale AIFI encoder block.
+The iOS app uses a serial latest-frame inference path with late-frame dropping,
+then tracks detections in image space and predicts their display-time position
+with `CADisplayLink`. The tracker is application-side only; ANE-S itself is a
+frame-by-frame detector.
 
-## Setup
+### iPhone 14 Plus benchmark
 
-Requires Python 3.12+ and uv.
+Measured on a physical iPhone 14 Plus with Xcode Instruments, CPU + Neural
+Engine compute units, screen recording off, and steady-state 20-25 second runs.
+
+| Core ML specialization | Median Neural Engine interval | Mean start-to-start cadence | Detector updates/s |
+| --- | ---: | ---: | ---: |
+| Standard | 75.6 ms | 82.8 ms | 12.1 |
+| `fastPrediction` | 68.7 ms | 75.2 ms | 13.3 |
+
+`fastPrediction` reduced the median Neural Engine interval by about 9.1% in this
+controlled comparison. The update rate is derived from steady-state Neural
+Engine interval spacing, not camera or display FPS. These measurements also do
+not imply that every model operation runs exclusively on the Neural Engine.
+
+## Running the project
+
+Python 3.12 and [uv](https://docs.astral.sh/uv/) are used for the
+training/export code.
 
 ```bash
-uv sync
+uv sync --locked
 ```
 
-## Usage
+The experiment notebooks contain the exact commands used for the reported
+training runs. The Hydra configs under `configs/experiment/` are starting points
+for reproducing or extending them.
 
-Commands use Hydra for configuration.
+To export a trained ANE-S checkpoint to Core ML:
 
-Train the DFINE-M teacher:
 ```bash
-uv run python -m adp.train.train +experiment=dfine_m_bdd30k
+uv run \
+  --with 'torch==2.7.0' \
+  --with 'torchvision==0.22.0' \
+  --with 'coremltools==9.0' \
+  python -m adp.export.coreml_check \
+  --checkpoint /path/to/best.pt \
+  --out artifacts/coreml/ane_s.mlpackage
 ```
 
-Train ANE-S, GT-only baseline:
-```bash
-uv run python -m adp.train.train +experiment=ane_s_bdd_finetune
-```
-
-Distill ANE-S from a teacher checkpoint:
-```bash
-uv run python -m adp.distill.train_distill \
-  +experiment=ane_s_bdd_distill \
-  distill.teacher_checkpoint=path/to/dfine_m_best.pt
-```
-
-Core ML export:
-```bash
-uv run python -m adp.export.coreml_check --model path/to/model.mlpackage
-```
-
-Real-time demo:
-```bash
-uv run python -m adp.export.realtime_demo --model path/to/model.mlpackage
-```
+The iOS app is in `ios/ADPDetector`. Open
+`ios/ADPDetector/ADPDetector.xcodeproj` in Xcode and run it on a physical
+iPhone. The repository includes the exported `ane_s.mlpackage` used by the app.
 
 ## Limitations
 
-- No temporal context (frame-by-frame processing).
-- Missing lane and drivable-area segmentation.
-- Bounding boxes only (no instance segmentation).
-- No metric depth estimation.
-- Bottlenecked by compute (subset training, early stopping).
-- Training pipeline can definitely be improved.
-- Model architecture can also be imporved.
+- The student was trained on 30k BDD100K training images for only 40 epochs and had not converged.
+- Detection accuracy is well below the D-FINE-M teacher and should not be interpreted as state of the art.
+- The live confidence threshold (`0.45`) was chosen for the demo and has not been formally calibrated on the validation set.
+- The Core ML exporter checks reparameterization equivalence, output shapes, finiteness, and logs raw FP16 conversion error, but I have not yet completed a detection-level PyTorch/Core ML parity study.
+- The iOS motion tracker improves display alignment between detector updates; it does not add temporal information to the detector itself.
 
-## Acknowledgments and References
+## References
 
-This project builds upon the following research and open-source work:
+- [BDD100K: A Diverse Driving Dataset for Heterogeneous Multitask Learning](https://arxiv.org/abs/1805.04687)
+- [FastViT: A Fast Hybrid Vision Transformer using Structural Reparameterization](https://arxiv.org/abs/2303.14189)
+- [D-FINE: Redefine Regression Task in DETRs as Fine-grained Distribution Refinement](https://arxiv.org/abs/2410.13842)
 
-- D-FINE: Peng, Y., et al. "D-FINE: Redefine Regression Task in DETRs as Fine-grained Distribution Refinement" (2024). Source of the teacher architecture, criterion, matcher, and FGL head. Reference implementation is used under the Apache 2.0 license.
-- FastViT: Vasu, P. K. A., et al. "FastViT: A Fast Hybrid Vision Transformer using Structural Reparameterization" (ICCV 2023). Used as the ANE-S backbone.
-- ml-ane-transformers: Apple's reference implementation for ANE-resident LayerNorm, attention, and FFN design.
-- Distillation Framework: Influenced by DETRDistill (ICCV 2023) and KD-DETR (CVPR 2024).
-- Dataset: BDD100K (Yu et al., 2018, UC Berkeley).
+Parts of the D-FINE training/model code are vendored from D-FINE-seg under
+Apache 2.0. See `THIRD_PARTY_LICENSES/`.

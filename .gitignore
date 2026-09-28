@@ -46,4 +46,11 @@ htmlcov/
 /test_coco.json
 /test_res.json
 
-/ios/
+# Xcode
+/ios/**/DerivedData/
+/ios/**/xcuserdata/
+*.xcuserstate
+
+# Bundled Core ML model used by the iOS demo.
+!ios/ADPDetector/ADPDetector/ane_s.mlpackage/
+!ios/ADPDetector/ADPDetector/ane_s.mlpackage/**

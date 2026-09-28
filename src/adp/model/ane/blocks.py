@@ -114,9 +114,8 @@ class ANEMultiHeadAttention(nn.Module):
         k = k.view(B, H, D, Sk)
         v = v.view(B, H, D, Sk)
 
-        # Attention scores: (B, H, Sq, Sk). Implemented as matmul (not einsum) to
-        # ensure CoreML/ANE op conversion einsum apparently annoying as the dont
-        # convert easy
+        # Attention scores: (B, H, Sq, Sk). Use matmul rather than einsum so
+        # the exported graph maps cleanly to Core ML operators.
         attn = torch.matmul(q.transpose(-2, -1), k) * self.scale
 
         if key_padding_mask is not None:

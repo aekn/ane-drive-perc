@@ -52,7 +52,7 @@ class AIFIFeatureDistillLoss(nn.Module):
         s_proj = self.projector(s_tokens)  # (B*H*W, Ct)
         t_tokens = teacher_feat.permute(0, 2, 3, 1).reshape(B * H * W, Ct).detach()
 
-        # Mean negative cosine similarity 2 get std loss (minimize -> align)
+        # Minimize one minus cosine similarity to align student and teacher.
         cos_sim = F.cosine_similarity(s_proj, t_tokens, dim=-1)
         loss = (1.0 - cos_sim).mean()
         return {"loss_aifi_cosine_distill": loss}

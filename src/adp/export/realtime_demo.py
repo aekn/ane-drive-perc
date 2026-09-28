@@ -1,20 +1,17 @@
-"""Real-time object detection demo using a CoreML ANE-S model.
+"""Run ANE-S on a camera or video using the exported Core ML model."""
 
-Usage:
-    python -m adp.export.realtime_demo --model artifacts/ane_s.mlpackage
-    python -m adp.export.realtime_demo --model artifacts/ane_s.mlpackage --video path/to/file.mp4
-    python -m adp.export.realtime_demo --model artifacts/ane_s.mlpackage --score-thresh 0.5
-"""
+from __future__ import annotations
 
 import argparse
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import numpy as np
+from PIL import Image
 
-# BDD-10 class names 0 indexed
-BDD_CLASSES = [
+BDD_CLASSES = (
     "pedestrian",
     "rider",
     "car",
@@ -25,9 +22,9 @@ BDD_CLASSES = [
     "bicycle",
     "traffic light",
     "traffic sign",
-]
+)
 
-_COLORS = [
+_COLORS = (
     (0, 114, 189),
     (217, 83, 25),
     (237, 177, 32),
@@ -38,221 +35,248 @@ _COLORS = [
     (76, 76, 76),
     (153, 153, 0),
     (255, 0, 127),
-]
+)
 
 
-def _letterbox(
-    frame: np.ndarray, target_h: int, target_w: int
-) -> tuple[np.ndarray, float, int, int]:
-    """Resize with padding to preserve aspect ratio.
+@dataclass(frozen=True)
+class Detection:
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    score: float
+    label: int
 
-    Returns (padded, scale, pad_left, pad_top).
-    """
-    src_h, src_w = frame.shape[:2]
-    scale = min(target_h / src_h, target_w / src_w)
-    new_h, new_w = int(src_h * scale), int(src_w * scale)
-    resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-
-    pad_top = (target_h - new_h) // 2
-    pad_left = (target_w - new_w) // 2
-    canvas = np.zeros((target_h, target_w, 3), dtype=np.uint8)
-    canvas[pad_top : pad_top + new_h, pad_left : pad_left + new_w] = resized
-    return canvas, scale, pad_left, pad_top
+    @property
+    def area(self) -> float:
+        return max(0.0, self.x2 - self.x1) * max(0.0, self.y2 - self.y1)
 
 
-def _preprocess(
-    frame_bgr: np.ndarray, h: int, w: int
-) -> tuple[np.ndarray, float, int, int]:
-    padded, scale, pad_left, pad_top = _letterbox(frame_bgr, h, w)
-    rgb = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-    chw = rgb.transpose(2, 0, 1)[None]  # (1, 3, H, W)
-    return chw, scale, pad_left, pad_top
+def _sigmoid(values: np.ndarray) -> np.ndarray:
+    return 1.0 / (1.0 + np.exp(-np.clip(values, -80.0, 80.0)))
 
 
-def _postprocess(
-    pred_logits: np.ndarray,  # (1, Q, C)
-    pred_boxes: np.ndarray,  # (1, Q, 4) cxcywh normalized
-    img_h: int,
-    img_w: int,
-    scale: float,
-    pad_left: int,
-    pad_top: int,
-    score_thresh: float,
-    nms_iou_thresh: float,
-) -> list[tuple[int, int, int, int, float, int]]:
-    """Returns list of (x1, y1, x2, y2, score, label) in original frame coords."""
-    scores_all = 1.0 / (1.0 + np.exp(-pred_logits[0]))  # sigmoid, (Q, C)
-    flat = scores_all.ravel()
-    q, c = scores_all.shape
-    boxes_cx = pred_boxes[0, :, 0]
-    boxes_cy = pred_boxes[0, :, 1]
-    boxes_w = pred_boxes[0, :, 2]
-    boxes_h = pred_boxes[0, :, 3]
+def _topk_indices(values: np.ndarray, k: int) -> np.ndarray:
+    if values.size <= k:
+        return np.argsort(values)[::-1]
+    indices = np.argpartition(values, -k)[-k:]
+    return indices[np.argsort(values[indices])[::-1]]
 
-    # filter by score threshold
-    mask = flat >= score_thresh
-    if not mask.any():
-        return []
 
-    idx = np.where(mask)[0]
-    scores = flat[idx]
-    labels = idx % c
-    qidx = idx // c
+def _iou(a: Detection, b: Detection) -> float:
+    x1 = max(a.x1, b.x1)
+    y1 = max(a.y1, b.y1)
+    x2 = min(a.x2, b.x2)
+    y2 = min(a.y2, b.y2)
+    intersection = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    if intersection <= 0.0:
+        return 0.0
+    union = a.area + b.area - intersection
+    return intersection / max(union, 1e-12)
 
-    x1 = (boxes_cx[qidx] - boxes_w[qidx] / 2) * img_w
-    y1 = (boxes_cy[qidx] - boxes_h[qidx] / 2) * img_h
-    x2 = (boxes_cx[qidx] + boxes_w[qidx] / 2) * img_w
-    y2 = (boxes_cy[qidx] + boxes_h[qidx] / 2) * img_h
 
-    # NMS; class agnostic 4 speed
-    order = np.argsort(-scores)
-    x1, y1, x2, y2 = x1[order], y1[order], x2[order], y2[order]
-    scores, labels = scores[order], labels[order]
-
-    keep = []
-    suppressed = np.zeros(len(x1), dtype=bool)
-    for i in range(len(x1)):
-        if suppressed[i]:
+def _class_aware_nms(
+    detections: list[Detection],
+    *,
+    iou_threshold: float,
+    max_detections: int,
+) -> list[Detection]:
+    kept: list[Detection] = []
+    for detection in sorted(detections, key=lambda item: item.score, reverse=True):
+        if any(
+            previous.label == detection.label
+            and _iou(previous, detection) > iou_threshold
+            for previous in kept
+        ):
             continue
-        keep.append(i)
-        ix1 = np.maximum(x1[i], x1[i + 1 :])
-        iy1 = np.maximum(y1[i], y1[i + 1 :])
-        ix2 = np.minimum(x2[i], x2[i + 1 :])
-        iy2 = np.minimum(y2[i], y2[i + 1 :])
-        inter = np.maximum(0, ix2 - ix1) * np.maximum(0, iy2 - iy1)
-        area_i = (x2[i] - x1[i]) * (y2[i] - y1[i])
-        area_j = (x2[i + 1 :] - x1[i + 1 :]) * (y2[i + 1 :] - y1[i + 1 :])
-        iou = inter / np.maximum(area_i + area_j - inter, 1e-6)
-        suppressed[i + 1 :][iou > nms_iou_thresh] = True
-
-    results = []
-    for i in keep:
-        # unpad + unscale back to original frame coords
-        fx1 = int((x1[i] - pad_left) / scale)
-        fy1 = int((y1[i] - pad_top) / scale)
-        fx2 = int((x2[i] - pad_left) / scale)
-        fy2 = int((y2[i] - pad_top) / scale)
-        results.append((fx1, fy1, fx2, fy2, float(scores[i]), int(labels[i])))
-    return results
+        kept.append(detection)
+        if len(kept) == max_detections:
+            break
+    return kept
 
 
-def _draw(frame: np.ndarray, dets: list, class_names: list[str]) -> np.ndarray:
-    out = frame.copy()
-    for x1, y1, x2, y2, score, label in dets:
-        color = _COLORS[label % len(_COLORS)]
-        cv2.rectangle(out, (x1, y1), (x2, y2), color, 2)
-        name = class_names[label] if label < len(class_names) else str(label)
-        text = f"{name} {score:.2f}"
-        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        cv2.rectangle(out, (x1, y1 - th - 4), (x1 + tw + 4, y1), color, -1)
+def postprocess(
+    pred_logits: np.ndarray,
+    pred_boxes: np.ndarray,
+    *,
+    score_threshold: float,
+    nms_iou_threshold: float,
+    topk: int = 300,
+    max_detections: int = 80,
+) -> list[Detection]:
+    """Convert DETR outputs to normalized xyxy detections for visualization."""
+    logits = np.asarray(pred_logits)[0]
+    boxes = np.asarray(pred_boxes)[0]
+    if logits.ndim != 2 or boxes.shape != (logits.shape[0], 4):
+        raise ValueError(
+            f"unexpected output shapes: logits={logits.shape}, boxes={boxes.shape}"
+        )
+
+    scores = _sigmoid(logits)
+    flat_scores = scores.reshape(-1)
+    class_count = scores.shape[1]
+
+    candidates: list[Detection] = []
+    for index in _topk_indices(flat_scores, topk):
+        score = float(flat_scores[index])
+        if score < score_threshold:
+            break
+
+        query = int(index // class_count)
+        label = int(index % class_count)
+        cx, cy, width, height = [float(value) for value in boxes[query]]
+        x1 = max(0.0, min(1.0, cx - width / 2.0))
+        y1 = max(0.0, min(1.0, cy - height / 2.0))
+        x2 = max(0.0, min(1.0, cx + width / 2.0))
+        y2 = max(0.0, min(1.0, cy + height / 2.0))
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        candidates.append(Detection(x1, y1, x2, y2, score, label))
+
+    return _class_aware_nms(
+        candidates,
+        iou_threshold=nms_iou_threshold,
+        max_detections=max_detections,
+    )
+
+
+def _model_image(frame: np.ndarray, *, height: int, width: int) -> Image.Image:
+    resized = cv2.resize(frame, (width, height), interpolation=cv2.INTER_LINEAR)
+    rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+    return Image.fromarray(rgb)
+
+
+def _draw(frame: np.ndarray, detections: list[Detection]) -> np.ndarray:
+    height, width = frame.shape[:2]
+    output = frame.copy()
+
+    for detection in detections:
+        x1 = int(round(detection.x1 * width))
+        y1 = int(round(detection.y1 * height))
+        x2 = int(round(detection.x2 * width))
+        y2 = int(round(detection.y2 * height))
+        color = _COLORS[detection.label % len(_COLORS)]
+
+        cv2.rectangle(output, (x1, y1), (x2, y2), color, 2)
+        name = (
+            BDD_CLASSES[detection.label]
+            if detection.label < len(BDD_CLASSES)
+            else str(detection.label)
+        )
+        text = f"{name} {detection.score:.0%}"
+        (text_width, text_height), _ = cv2.getTextSize(
+            text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
+        )
+        top = max(0, y1 - text_height - 6)
+        cv2.rectangle(
+            output,
+            (x1, top),
+            (x1 + text_width + 6, top + text_height + 6),
+            color,
+            -1,
+        )
         cv2.putText(
-            out,
+            output,
             text,
-            (x1 + 2, y1 - 2),
+            (x1 + 3, top + text_height + 2),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
             (255, 255, 255),
             1,
+            cv2.LINE_AA,
         )
-    return out
+
+    return output
 
 
 def run(
+    *,
     model_path: Path,
     video_source: int | str,
-    model_h: int,
-    model_w: int,
-    score_thresh: float,
-    nms_iou_thresh: float,
-    class_names: list[str],
+    model_height: int,
+    model_width: int,
+    score_threshold: float,
+    nms_iou_threshold: float,
 ) -> None:
     import coremltools as ct
 
-    print(f"loading {model_path} ...")
-    model = ct.models.MLModel(str(model_path), compute_units=ct.ComputeUnit.CPU_AND_NE)
-
-    cap = cv2.VideoCapture(video_source)
-    if not cap.isOpened():
+    model = ct.models.MLModel(
+        str(model_path), compute_units=ct.ComputeUnit.CPU_AND_NE
+    )
+    capture = cv2.VideoCapture(video_source)
+    if not capture.isOpened():
         raise RuntimeError(f"cannot open video source: {video_source}")
 
-    print("press q to quit")
-    frame_times: list[float] = []
+    timings: list[float] = []
+    try:
+        while True:
+            ok, frame = capture.read()
+            if not ok:
+                break
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+            image = _model_image(frame, height=model_height, width=model_width)
+            start = time.perf_counter()
+            output = model.predict({"image": image})
+            inference_ms = (time.perf_counter() - start) * 1000.0
 
-        t0 = time.perf_counter()
-        chw, scale, pad_left, pad_top = _preprocess(frame, model_h, model_w)
-        pred = model.predict({"image": chw})
-        logits = pred["pred_logits"]  # (1, Q, C)
-        boxes = pred["pred_boxes"]  # (1, Q, 4)
-        infer_ms = (time.perf_counter() - t0) * 1000
+            detections = postprocess(
+                output["pred_logits"],
+                output["pred_boxes"],
+                score_threshold=score_threshold,
+                nms_iou_threshold=nms_iou_threshold,
+            )
+            visualization = _draw(frame, detections)
 
-        dets = _postprocess(
-            logits,
-            boxes,
-            model_h,
-            model_w,
-            scale,
-            pad_left,
-            pad_top,
-            score_thresh,
-            nms_iou_thresh,
-        )
-        vis = _draw(frame, dets, class_names)
+            timings.append(inference_ms)
+            if len(timings) > 30:
+                timings.pop(0)
+            average_ms = sum(timings) / len(timings)
+            hud = f"ANE-S  {average_ms:.1f} ms  {len(detections)} objects"
+            cv2.putText(
+                visualization,
+                hud,
+                (12, 28),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
 
-        frame_times.append(infer_ms)
-        if len(frame_times) > 30:
-            frame_times.pop(0)
-        avg_ms = sum(frame_times) / len(frame_times)
-        cv2.putText(
-            vis,
-            f"{avg_ms:.1f} ms  ({1000 / avg_ms:.1f} fps)  n={len(dets)}",
-            (10, 28),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (0, 255, 0),
-            2,
-        )
+            cv2.imshow("ANE-S", visualization)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+    finally:
+        capture.release()
+        cv2.destroyAllWindows()
 
-        cv2.imshow("ANE-S demo", vis)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
 
-    cap.release()
-    cv2.destroyAllWindows()
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model", type=Path, required=True)
+    parser.add_argument("--video", default="0")
+    parser.add_argument("--img-h", type=int, default=544)
+    parser.add_argument("--img-w", type=int, default=960)
+    parser.add_argument("--score-thresh", type=float, default=0.45)
+    parser.add_argument("--nms-iou-thresh", type=float, default=0.60)
+    return parser.parse_args()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument("--model", type=Path, required=True, help="path to .mlpackage")
-    parser.add_argument(
-        "--video", default=0, help="video file path or webcam index (default: 0)"
-    )
-    parser.add_argument("--img-h", type=int, default=544)
-    parser.add_argument("--img-w", type=int, default=960)
-    parser.add_argument("--score-thresh", type=float, default=0.4)
-    parser.add_argument("--nms-iou-thresh", type=float, default=0.5)
-    args = parser.parse_args()
-
-    video_source: int | str = args.video
+    args = _parse_args()
     try:
-        video_source = int(args.video)
-    except (TypeError, ValueError):
-        pass
+        video_source: int | str = int(args.video)
+    except ValueError:
+        video_source = args.video
 
     run(
         model_path=args.model,
         video_source=video_source,
-        model_h=args.img_h,
-        model_w=args.img_w,
-        score_thresh=args.score_thresh,
-        nms_iou_thresh=args.nms_iou_thresh,
-        class_names=BDD_CLASSES,
+        model_height=args.img_h,
+        model_width=args.img_w,
+        score_threshold=args.score_thresh,
+        nms_iou_threshold=args.nms_iou_thresh,
     )
 
 
