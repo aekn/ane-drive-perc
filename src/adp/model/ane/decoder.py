@@ -45,7 +45,7 @@ class ANEDecoderLayer(nn.Module):
         memory_pos: Tensor | None = None,
         memory_key_padding_mask: Tensor | None = None,
     ) -> Tensor:
-        # selfattn
+        # Self-attention.
         residual = queries
         h = self.norm_q1(queries)
         q = h if query_pos is None else h + query_pos
@@ -53,7 +53,7 @@ class ANEDecoderLayer(nn.Module):
         h = self.self_attn(q, k, h)
         queries = residual + h
 
-        # crosattn
+        # Cross-attention.
         residual = queries
         h = self.norm_q2(queries)
         q = h if query_pos is None else h + query_pos

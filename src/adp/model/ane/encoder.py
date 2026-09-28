@@ -148,7 +148,7 @@ class ANEHybridEncoder(nn.Module):
             eval_spatial_size  # (H_input, W_input) for cached pos embed
         )
 
-        # perscale 1x1 projection to embed_dim.
+        # Per-scale 1x1 projection to embed_dim.
         self.input_proj = nn.ModuleList(
             [_conv_bn_act(c, embed_dim, kernel=1, act=False) for c in in_channels]
         )

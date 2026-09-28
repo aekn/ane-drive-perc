@@ -1,8 +1,8 @@
-"""ANE-optimized detector family.
+"""ANE-oriented detector family.
 
-Architecture: FastViT-T8/T12 backbone (Apple ImageNet weights) + ANE-optimized
-hybrid encoder (Conv2d 1x1, ANE LayerNorm, split-softmax) + DFINE-shape decoder
-with vanilla content-based cross-attention for full ANE residency.
+Architecture: FastViT-T8/T12 backbone with ImageNet weights, an ANE-oriented
+hybrid encoder, and a DETR-style decoder built from Core ML-friendly tensor
+layouts and attention operations.
 """
 
 from __future__ import annotations
